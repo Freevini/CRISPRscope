@@ -1,0 +1,3128 @@
+---
+title: "Supplemental Analysis script"
+author: "Vincent Somerville"
+date: "11/12/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup ,echo=FALSE}
+knitr::opts_chunk$set(message=FALSE, echo=TRUE, eval=FALSE)
+.libPaths( c(  .libPaths(),"/home/vincent/R/x86_64-pc-linux-gnu-library/4.0" ) )
+
+.libPaths(c("/home/vincent/R/x86_64-pc-linux-gnu-library/4.1","/home/vincent/R/x86_64-pc-linux-gnu-library/4.0", "/usr/local/lib/R/site-library",                   "/usr/lib/R/site-library"       ,                  "/usr/lib/R/library"                              ))
+```
+
+This script includes the complete workflow how the data for the following publication was analysed:
+
+*Extensive diversity and rapid turnover of phage defense systems in cheese-associated bacterial communities*
+
+The script contains the following information. The three parts consist of:
+
+1. Necessary R and bash tools
+2. Data collections
+3. General script
+
+This is saved and compiled as a Rmarkdown with extensive comments. If questions do arise please contact the lead author. 
+
+# Necessary R libraries 
+
+Here, I load the necessary R libaries
+
+```{r}
+library(plyr)
+library(tidyverse)
+library(ggridges)
+library(viridis)
+library(ggpmisc)
+library(ape)
+library(micropan)
+library(vegan)
+library(ggpubr)
+library(rstatix)
+library(plotly)
+library(ggbiplot)
+library(grid)
+library(gridExtra)
+library(patchwork)
+library(ggsignif)
+library(stringr)
+library(ggplot2)
+library(reshape2)
+library(ggstance)
+library(ggtree)
+library(tidytree)
+library(treeio)
+library(TreeTools)
+library(phyloseq)
+```
+
+# Necessary bash tools
+
+Here, are the necessary bash tools used throughout the script. 
+
+```{bash}
+metaphlan2 --version
+fastani --version
+blastn --version
+prokka --version
+cd-hit --version
+```
+
+
+# Necessary data
+
+All data used in the manuscript is deposited on zenodo and NCBI. 
+
+# Genome and metagenome collection
+
+The genomes and metagenomes are deposited on NCBI and can be viewed in the supplmentary table. 
+
+```{r}
+
+
+genomes_01 <- read_csv("../data_submit/pathway_strain.txt") %>% select(genome,species) %>% unique()
+table(genomes_01$species)
+
+genomes_02 <- read_csv("../data_submit/StrainCasType_withSubtype.csv") %>% select(Strain,Organism) %>% unique()
+table(genomes_02$Organism)
+
+rbind(genomes_01,genomes_02)
+```
+
+
+# General analysis
+
+Here, we go through the general analysis of the manuscirpt.
+The different Results chapter are seperated by the figures. 
+
+# Figure 1
+
+Here, I go through the basic analysis on which the figures are the then created upon (see 02_figure_mainBody_rmk202.Rmd)
+
+## Metagenomic diversity
+
+First we run Metaphlan on the shotgun metagenome dataset. 
+
+```{bash}
+###-----------------------------------------------------
+####Description section
+#Here you can define the locations and file names
+###-----------------------------------------------------
+threads=10
+BaseLocation_output=<directory where your output should go>
+
+###-----------------------------------------------------
+####script
+###-----------------------------------------------------
+
+rm ${BaseLocation_output}/metaphlan/allStrains_metaphlan.txt
+
+  for bioprojectsss in $(ls /data/projects/p539_crisprscope/0_data/metagenomes) #loop through the different bioprojects
+    do
+    echo "======================================="
+    echo -e "Bioproject: "${bioprojectsss}
+    for biosamplesss in $(ls /data/projects/p539_crisprscope/0_data/metagenomes/${bioprojectsss}) #loop through the different biosamples
+      do
+      echo "======================================="
+      echo -e "Biosample: "${biosamplesss}
+      
+    rm -r ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}
+    mkdir -p ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}/{bowtie2ouput,metaphlan_profile}
+    
+      #check number of read files
+      numReadss=$(ls /data/projects/p539_crisprscope/0_data/metagenomes/${bioprojectsss}/${biosamplesss} |wc -l)
+    
+      if [ "$numReadss" = "2"  ]
+        then
+        echo -e "there are two read files in the directory, therefore we run a PE metaphlan"
+        
+
+   metaphlan2 --nproc 30 --input_type fastq <(zcat /data/projects/p539_crisprscope/0_data/metagenomes/${bioprojectsss}/${biosamplesss}/*_R1*  /data/projects/p539_crisprscope/0_data/metagenomes/${bioprojectsss}/${biosamplesss}/*_R2* ) \
+   --bowtie2out  ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}///bowtie2ouput/metagenome_${biosamplesss}_trimmed.bowtie2.bz2 --nproc ${threads} > \
+   ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}/metaphlan_profile/profiled_metagenome_${names}_trimmed.txt
+   
+   grep "s__"  ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}/metaphlan_profile/profiled_metagenome_${names}_trimmed.txt |grep "t__" -v|awk -F "[\t|]" -v culturess="$bioprojectsss" -v strainzzzss="$biosamplesss" '{OFS="\t"}{print culturess,strainzzzss,$7,$8}' >>  ${BaseLocation_output}/metaphlan/allStrains_metaphlan.txt
+   
+      else
+        echo -e "there are only one read file in the directory, therefore we run a single end bwa alignement"
+        bwa mem -t 37 $mappingFile \
+        /data/projects/p539_crisprscope/0_data/metagenomes/${bioprojectsss}/${biosamplesss}/* | samtools sort -@${threads} -O BAM \
+        -o ${BaseLocation_output}/bwaMapping2DB/${bioprojectsss}_${biosamplesss}_rawIllumina_bwamem_sorted.bam - 
+        
+   metaphlan2 --nproc 30 --input_type fastq <(zcat /data/projects/p539_crisprscope/0_data/metagenomes/${bioprojectsss}/${biosamplesss}/*) \
+   --bowtie2out  ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}///bowtie2ouput/metagenome_${biosamplesss}_trimmed.bowtie2.bz2 --nproc ${threads} > \
+   ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}/metaphlan_profile/profiled_metagenome_${names}_trimmed.txt
+   
+   grep "s__"  ${BaseLocation_output}/metaphlan/${bioprojectsss}_${biosamplesss}/metaphlan_profile/profiled_metagenome_${names}_trimmed.txt |grep "t__" -v|awk -F "[\t|]" -v culturess="$bioprojectsss" -v strainzzzss="$biosamplesss" '{OFS="\t"}{print culturess,strainzzzss,$7,$8}' >>  ${BaseLocation_output}/metaphlan/allStrains_metaphlan.txt
+   
+        
+      fi
+  
+    done #biosamplessss
+  done #bioprojectsss
+
+```
+
+This is the analysis of the sequenced metagenomic datasets. 
+
+```{r}
+
+
+myFMBN_new1_prev_ab_table <- read_delim("data_submit/20210426_final_all1_prev_ab_table.txt", "\t", escape_double = FALSE, trim_ws = TRUE) %>% filter(!is.na(species))
+
+myFMBN_new_again_again2_filt_OTU_table <- read_delim("data_submit/20210426_final_all1_filt_OTU_table.txt","\t", escape_double = FALSE, trim_ws = TRUE)
+
+
+names.use <- names(myFMBN_new_again_again2_filt_OTU_table)[(names(myFMBN_new_again_again2_filt_OTU_table) %in% c("sample_name",myFMBN_new1_prev_ab_table$label))]
+OTU_sample <- (myFMBN_new_again_again2_filt_OTU_table)[, names.use] 
+
+OTU_sample_long <- gather(OTU_sample, species,relAbundance,colnames(OTU_sample)[2]:colnames(OTU_sample)[ncol(OTU_sample)],  factor_key=TRUE,na.rm = TRUE) %>% filter(relAbundance>0.1)
+OTU_sample_long$sample_name %>% unique() %>% length()
+OTU_sample_long_summarise <- OTU_sample_long%>%  group_by(species)  %>%  dplyr::summarize(prevelance=100*(n()/length(unique(OTU_sample_long$sample_name))),median = 100*(median(relAbundance))) 
+
+OTU_sample_long_summarise %>% filter(prevelance>2&median<0.1)
+OTU_sample_long_summarise %>% filter(prevelance>2&median>0.1)
+
+final_species <- OTU_sample_long_summarise %>% filter(prevelance>2&median>0.1)
+##----------------------------------------------
+###SUBSET PROPERLY
+
+dat <- readRDS("data_submit/20210426_final_all1.RDS")
+studies_DF <- dat$studies
+
+tmp <- studies_DF %>% select(studyId,short_descr)
+
+samples_DF <- dat$samples
+
+##-----------------
+#select only specific cheese samples and feremented spoilage
+##-----------------
+
+samples_selected <- samples_DF %>% filter(foodId %in% c("A02QJ",
+"A02ZQ",
+"A02ZS",
+"A048Y",
+"A02YH",
+"A02TY",
+"A02QL",
+"A02XL",
+"A02ZL",
+"A02ZL",
+"A02SV",
+"A02XE",
+"A02YM",
+"A02RH",
+"A02ST",
+"A02YE",
+"A02YD",
+"A02YM",
+"A02QP",
+"A02TJ",
+"A02XH",
+"A030V",
+"A02RH",
+"A02RN",
+"A02RL",
+"A02RJ",
+"A030Y",
+"A02SF",
+"A030X",
+"A02RR",
+"A02TY",
+"A02VA",
+"A02SV",
+"A04NV",
+"A02RV",
+"A02YK",
+"A02YP",
+"A02VF",
+"A02ZD",
+"A02YE",
+"A02ZN",
+"A02XE",
+"A02YE")) %>% filter(spoilage=="Fermented") %>% dplyr::filter(!grepl("rind",description, ignore.case =TRUE))
+
+studyextension <- samples_selected %>% select(studyId,label_2)
+names_selected <- samples_selected$label_2
+OTU_subset <- OTU_sample %>% filter(sample_name %in%names_selected)
+
+##-----------------------------------
+#calculate abundance
+##-----------------------------------
+OTU_subset_long <- gather(OTU_subset, species,relAbundance,colnames(OTU_subset)[2]:colnames(OTU_subset)[ncol(OTU_subset)],  factor_key=TRUE,na.rm = TRUE) %>% filter(relAbundance>0.2) #%>% filter(relAbundance!=0)
+OTU_subset_long_summarise <- OTU_subset_long%>%  group_by(species)  %>%  dplyr::summarize(prevelance=100*(n()/length(unique(OTU_subset_long$sample_name))),median = 100*(median(relAbundance))) 
+final_species_final <- OTU_subset_long_summarise %>% filter(prevelance>2&median>0.1)
+
+##-----------------------------------
+#prepare shotgun metaG data
+##-----------------------------------
+X20210424_metaphlan <- read_csv("data_submit/20210424_metaphlan.txt") %>% select(-X1)%>% rename("relAbundance"="abundance") %>% rename("sample_name"="SRA_ID")  %>% rename("studyId"="ProjectID") %>% add_column(method="metagenome") #%>% filter(relAbundance>0.2) 
+OTU_subset_long <- gather(OTU_subset, species,relAbundance,colnames(OTU_subset)[2]:colnames(OTU_subset)[ncol(OTU_subset)],  factor_key=TRUE,na.rm = TRUE)  %>% mutate(relAbundance=100*relAbundance) #%>% filter(relAbundance>0.2)#%>% filter(relAbundance!=0)
+OTU_subset_long_extended <- merge(OTU_subset_long,studyextension,by.x = "sample_name",by.y="label_2") %>% as.tibble()  %>% select(studyId,sample_name,species,relAbundance)%>% add_column(method="16S")
+OTU_subset_long_extended_full <- rbind(X20210424_metaphlan,OTU_subset_long_extended) %>% filter(species!=0)
+
+ggplot(OTU_subset_long_extended_full, aes(x=sample_name,y=relAbundance,color=species,fill=species))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")
+
+##------color subdominant
+
+OTU_subset_long_extended_full_subdominant <- OTU_subset_long_extended_full %>% filter(relAbundance<0.2) %>% mutate(species_new="subdominant")
+OTU_subset_long_extended_full_dominant <- OTU_subset_long_extended_full %>% filter(relAbundance>=0.2) %>% mutate(species_new=species)
+OTU_subset_long_extended_full_dominance <- rbind(OTU_subset_long_extended_full_dominant,OTU_subset_long_extended_full_subdominant)  %>% filter(relAbundance!=0)%>% droplevels()
+
+ggplot(OTU_subset_long_extended_full_dominance, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")
+
+##------remove samples with less then 50% species identification
+
+
+tmp_samples <- OTU_subset_long_extended_full_dominance %>% group_by(sample_name) %>% summarise(sumsss =sum(relAbundance)) %>% filter(sumsss<50)
+OTU_subset_long_extended_full_dominance_filtered <- OTU_subset_long_extended_full_dominance %>% filter(!sample_name %in% tmp_samples$sample_name)%>% droplevels()
+ggplot(OTU_subset_long_extended_full_dominance_filtered, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")
+
+##------summarise to remove low prevelence species
+
+OTU_subset_long_summarise <- OTU_subset_long_extended_full_dominance_filtered%>%  group_by(species)  %>%  dplyr::summarize(prevelance=100*(n()/length(unique(OTU_subset_long_extended_full_dominance_filtered$sample_name))),median =(median(relAbundance))) 
+OTU_subset_long_summarise_prevelance <- OTU_subset_long_summarise %>% filter(prevelance>0.5)%>% filter(median>0.25)
+OTU_subset_long_summarise__subdominant <- OTU_subset_long_summarise %>% filter(!prevelance>0.5)%>% filter(!median>0.25)
+
+
+OTU_subset_long_extended_full_dominance_dom <- OTU_subset_long_extended_full_dominance_filtered %>% filter(species_new %in% OTU_subset_long_summarise_prevelance$species)
+OTU_subset_long_extended_full_dominance_sub <- OTU_subset_long_extended_full_dominance_filtered %>% filter(!species_new %in% OTU_subset_long_summarise_prevelance$species)
+OTU_subset_long_extended_full_dominance_sub$species_new <- "subdominant"
+
+OTU_subset_long_extended_full_dominance_again <- rbind(OTU_subset_long_extended_full_dominance_dom,OTU_subset_long_extended_full_dominance_sub)  %>% filter(relAbundance!=0)%>% droplevels() %>% filter(species_new!="Pediococcus sp")
+ggplot(OTU_subset_long_extended_full_dominance_again, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")
+
+###add to 100% for unassigned
+unassigned <- OTU_subset_long_extended_full_dominance_again %>% group_by(studyId,sample_name,method) %>% summarise(relAbundance=100-sum(relAbundance)) %>% filter(relAbundance>0.1) %>% mutate(species="unassigned")%>% mutate(species_new="unassigned") %>% select(studyId,sample_name,species,relAbundance,method,species_new)
+
+OTU_subset_long_extended_full_dominance_again_final <- rbind(OTU_subset_long_extended_full_dominance_again,unassigned)  %>% droplevels() 
+ggplot(OTU_subset_long_extended_full_dominance_again_final, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")
+
+###------------------------------------------
+##order species
+
+ordersss <- OTU_subset_long_summarise_prevelance[order(OTU_subset_long_summarise_prevelance$prevelance),] %>% select(species) %>% pull(species)
+ordersss_final <- c("unassigned","subdominant",ordersss)
+OTU_subset_long_extended_full_dominance_again_final$species_new = factor(OTU_subset_long_extended_full_dominance_again_final$species_new, levels=ordersss_final)
+ggplot(OTU_subset_long_extended_full_dominance_again_final, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")
+
+colorss <- c(
+  "grey77", #unassigned
+  "grey66", #subdominant
+  rev(rainbow(23)[-1]),
+  #...
+  "#87deaa", #llactis
+  "#ffcc00", #lhelv
+  "#fdc2b5", #ldel
+  "#007fa6") #Sterm
+
+alphasss <- c(rep(0.3,24),rep(1,4))
+
+ggplot(OTU_subset_long_extended_full_dominance_again_final, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new,alpha=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")+
+  scale_color_manual(values = colorss)+ scale_fill_manual(values = colorss)+scale_alpha_manual(values = alphasss)
+
+OTUs_print <- OTU_subset_long_extended_full_dominance_again_final %>% group_by(species_new)    %>%  dplyr::summarize(counts=n(),prevelance=100*(n()/length(unique(OTU_subset_long_extended_full_dominance_again_final$sample_name))),median = median(relAbundance)) %>% filter(!species_new %in% c("unassigned","subdominant"))
+
+# write.csv(OTUs_print,file="~/Desktop/Projects/2020_CRISPRscope/metaphlan/20210428_metaphlan_final_species.txt")
+
+##====================================
+###color accordingly..
+##====================================
+
+data.frame(species= c( "Lactobacillus acidophilus",
+"Lactobacillus fermentum", "Pediococcus parvulus",
+"Bifidobacterium animalis", "Brevibacterium aurantiacum", "Lactobacillus versmoldensis",
+"Leuconostoc lactis", "Corynebacterium casei", "Pediococcus pentosaceus",
+"Propionibacterium freudenreichii", "Streptococcus luteciae",
+"Lactobacillus rhamnosus", "Lactobacillus coryniformis", "Lactobacillus curvatus",
+"Brevibacterium linens", "Leuconostoc pseudomesenteroides", "Lactobacillus plantarum",
+"Staphylococcus sciuri", "Leuconostoc mesenteroides", "Propionibacterium acnes",
+"Staphylococcus equorum", "Lactobacillus casei", "Lactococcus lactis",
+"Lactobacillus helveticus", "Lactobacillus delbrueckii", "Streptococcus thermophilus"
+),
+color= c("#fdc2b496","#a4778bff","#a3758a64","#17c3b2ff","#16c3b396","#a7c5da4b","#ff6d584b","grey","#a3768aaf","#61988eff","#007ea796","#a7c5da96","#eeabc4ff","#eeaac396","#14c2b14b","#ff6f59ff","#a3758a32","#c8beb7ff","#ff6e5896","grey","grey","#a7bed3ff","#eeba0bff","#fcc2b44b","#fdc2b5ff","#007fa6ff"))
+
+speciesss <- c("unassigned", "subdominant", "Lactobacillus acidophilus", 
+"Lactobacillus fermentum", "Pediococcus parvulus", "Pediococcus sp", 
+"Bifidobacterium animalis", "Brevibacterium aurantiacum", "Lactobacillus versmoldensis", 
+"Leuconostoc lactis", "Corynebacterium casei", "Pediococcus pentosaceus", 
+"Propionibacterium freudenreichii", "Streptococcus luteciae", 
+"Lactobacillus rhamnosus", "Lactobacillus coryniformis", "Lactobacillus curvatus", 
+"Brevibacterium linens", "Leuconostoc pseudomesenteroides", "Lactobacillus plantarum", 
+"Staphylococcus sciuri", "Leuconostoc mesenteroides", "Propionibacterium acnes", 
+"Staphylococcus equorum", "Lactobacillus zeae", "Lactococcus lactis", 
+"Lactobacillus helveticus", "Lactobacillus delbrueckii", "Streptococcus thermophilus"
+)
+
+colorsss <- c("NA","NA","#fdc2b496","#a4778bff","#a3758a64","#17c3b2ff","#16c3b396","#a7c5da4b","#ff6d584b","grey","#a3768aaf","#61988eff","#007ea796","#a7c5da96","#eeabc4ff","#eeaac396","#14c2b14b","#ff6f59ff","#a3758a32","#c8beb7ff","#ff6e5896","grey","grey","#a7bed3ff","#eeba0bff","#fcc2b44b","#fdc2b5ff","#007fa6ff")
+
+##------------filter out samples with only two samples
+tmp <- OTU_subset_long_extended_full_dominance_again_final %>% select(studyId,sample_name) %>% as.data.frame()%>% unique()
+OTU_subset_long_extended_full_dominance_again_final <- OTU_subset_long_extended_full_dominance_again_final %>% filter(!studyId %in% c("PRJNA286900","ST107","ST23","ST80"))
+##------------plot
+
+ggplot(OTU_subset_long_extended_full_dominance_again_final, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")+
+  scale_color_manual(values = colorsss)+ scale_fill_manual(values = colorsss)
+
+##------------------------------order according to mesophilic/thermophilus
+OTU_subset_long_extended_full_dominance_again_final$studyId = factor(OTU_subset_long_extended_full_dominance_again_final$studyId, levels=c("20201217_metagenomes", "PRJNA603575", "ST3", "ST4", "ST7", "ST10", 
+"ST9", "ST18", "ST22", "ST8", "ST48", "ST49",
+ "CheeseRaclette", "PRJEB23938", "PRJEB30079", 
+"PRJEB32768","ST106","ST6"))
+
+##------------plot
+
+ggplot(OTU_subset_long_extended_full_dominance_again_final, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")+
+  scale_color_manual(values = colorsss)+ scale_fill_manual(values = colorsss)+theme(legend.position = "none",axis.ticks.x = element_blank(),axis.text.x=element_blank(),strip.background = element_blank(),strip.text.x = element_text(angle = 45, 
+    size = 8))+ scale_y_continuous(expand = c(0,0))+labs(x="samples",y="relative Abundance [%]")
+
+##-------------refshort
+
+studies_DF_shrot <- studies_DF %>% select(c("studyId","ref_short"))
+namechange <- setNames(studies_DF_shrot$ref_short,studies_DF_shrot$studyId)
+
+OTU_subset_long_extended_full_dominance_again_final$studyId <- plyr::revalue(OTU_subset_long_extended_full_dominance_again_final$studyId,namechange)
+OTU_subset_long_extended_full_dominance_again_final$studyId <- plyr::revalue(OTU_subset_long_extended_full_dominance_again_final$studyId,c("20201217_metagenomes"="Swiss starter cultures","CheeseRaclette"="Swiss Raclette"))
+OTU_subset_long_extended_full_dominance_again_final$studyId <- plyr::revalue(OTU_subset_long_extended_full_dominance_again_final$studyId,c("PRJNA603575"="Pasolli et al., 2020","PRJEB23938"="Duru et al., 2018","PRJEB30079"="Lordan et al., 2019","PRJEB32768"="Walsh et al., 2020"))
+
+##------------plot
+levels(OTU_subset_long_extended_full_dominance_again_final$species_new) %>% length()
+colorsss %>% length()
+
+final_abundanc_barchart <- ggplot(OTU_subset_long_extended_full_dominance_again_final, aes(x=sample_name,y=relAbundance,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")+
+  scale_color_manual(values = colorsss)+ scale_fill_manual(values = colorsss)+theme(legend.position = "none",axis.ticks.x = element_blank(),axis.text.x=element_blank(),strip.background = element_blank(),strip.text.x = element_text(angle = 45, 
+    size = 8))+ scale_y_continuous(expand = c(0,0))+labs(x="samples",y="relative Abundance [%]")+ coord_cartesian(clip = 'off')
+
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/species_barplot_abundance.pdf",width=22,height=6)
+
+final_abundanc_barchart
+# dev.off()
+
+##-----------------------------------------------------------
+##------------make 100% relative abundance
+##-----------------------------------------------------------
+OTU_subset_long_extended_full_dominance_again_final_tmp <- OTU_subset_long_extended_full_dominance_again_final %>% filter(!species_new %in% c("unassigned","subdominant"))
+tmp1 <- OTU_subset_long_extended_full_dominance_again_final_tmp %>% group_by(sample_name) %>% summarise(total_abundance=sum(relAbundance))
+OTU_subset_long_extended_full_dominance_again_final_02 <- merge(OTU_subset_long_extended_full_dominance_again_final_tmp,tmp1,by="sample_name") %>% mutate(relAbundance_02=100*(relAbundance/total_abundance))
+
+colorzzz <-  c("#fdc2b496","#a4778bff","#a3758a64","#17c3b2ff","#16c3b396","#a7c5da4b","#ff6d584b","grey","#a3768aaf","#61988eff","#007ea796","#a7c5da96","#eeabc4ff","#eeaac396","#14c2b14b","#ff6f59ff","#a3758a32","#c8beb7ff","#ff6e5896","grey","grey","#a7bed3ff","#eeba0bff","#fcc2b44b","#fdc2b5ff","#007fa6ff")
+
+final_abundanc_barchart_02 <- ggplot(OTU_subset_long_extended_full_dominance_again_final_02, aes(x=sample_name,y=relAbundance_02,color=species_new,fill=species_new))+geom_bar(stat = "identity")+theme_classic()+facet_grid(~studyId, scales = "free_x", space = "free_x")+
+  scale_color_manual(values = colorzzz)+ scale_fill_manual(values = colorzzz)+theme(legend.position = "none",axis.ticks.x = element_blank(),axis.text.x=element_blank(),strip.background = element_blank(),strip.text.x = element_text(angle = 45, 
+    size = 8))+ scale_y_continuous(expand = c(0,0))+labs(x="samples",y="relative Abundance [%]")+ coord_cartesian(clip = 'off')
+final_abundanc_barchart_02
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/species_barplot_abundance.pdf",width=22,height=6)
+
+final_abundanc_barchart_02
+# dev.off()
+
+
+# write.table(OTU_subset_long_extended_full_dominance_again_final_02,"~/Desktop/Projects/2020_CRISPRscope/metagenomes_sample_count.txt",sep=",",quote = FALSE,row.names = FALSE)
+
+
+##-----------------------------------------------------------
+##------------create color dataframe
+##-----------------------------------------------------------
+
+namesss <- levels(OTU_subset_long_extended_full_dominance_again_final$species_new) 
+namesss <- namesss[namesss!="Pediococcus sp"]
+
+color_df <- data.frame(species=namesss,color=colorsss)
+# write.table(color_df,"~/Desktop/Projects/2020_CRISPRscope/species_colors.txt",sep="\t",quote = FALSE,row.names = FALSE)
+
+```
+
+## Species phylogeny
+
+First step includes the annotation of the genomes.
+
+```{bash}
+conda activate PROKKA
+  num=1
+
+ for genomessss in $(ls /data/projects/p539_crisprscope/06_genomes_speciesOFInterest// |grep ".fna$" |sed 's/.fna//g')
+ do
+ echo $genomessss
+ 
+ rm -r /data/projects/p539_crisprscope/02_PROKKA_speciesOFInterest/${genomessss}
+ prokka --cpus  35 --outdir /data/projects/p539_crisprscope/02_PROKKA_speciesOFInterest/${genomessss} --locustag REFs_${num}  --proteins proteins.faa --evalue 0.001 --addgenes /data/projects/p539_crisprscope/06_genomes_speciesOFInterest/$genomessss.fna
+ num=$((num+1))
+
+  done
+```
+
+Then we create a phylogeny for the different species with BCGtree.
+
+```{bash}
+###------------------------------------
+#outgroup
+###------------------------------------
+mkdir -p /data/projects/p539_crisprscope/01_data/phylogeny_outgroup
+
+###CBASS
+grep "eggerthia catenaformis" -i  /data/projects/p539_crisprscope/ncbi/genome/download.file | tail -1 | awk 'BEGIN{FS="\t";OFS="\t"}  {print $20}' |sed -r 's|(ftp://ftp.ncbi.nlm.nih.gov/genomes/all/.+/)(GCF_.+)|\1\2\/\2_protein.faa.gz|' >  /data/projects/p539_crisprscope/01_data/phylogeny_outgroup/eggerthia_catenaformis.log
+cd /data/projects/p539_crisprscope/01_data/phylogeny_outgroup/
+wget -i /data/projects/p539_crisprscope/01_data/phylogeny_outgroup/eggerthia_catenaformis.log
+gunzip *.faa.gz
+mv GCF_002148845.1_ASM214884v1_protein.faa eggerthia_catenaformis.faa
+
+##----------------------------------------
+##prep file
+##----------------------------------------
+rm -r /data/projects/p539_crisprscope/05_BCGtree_new
+mkdir -p /data/projects/p539_crisprscope/05_BCGtree_new
+rm /data/projects/p539_crisprscope/05_BCGtree_new/log.txt
+
+echo -e "--proteome Outgroup=/data/projects/p539_crisprscope/01_data/phylogeny_outgroup/eggerthia_catenaformis.faa" >> /data/projects/p539_crisprscope/05_BCGtree_new/log.txt
+
+for speciesss in $(ls /data/projects/p539_crisprscope/02_PROKKA_speciesOFInterest/ )
+do
+echo "===================================="
+echo ${speciesss}
+
+prokka_tmp=$(ls /data/projects/p539_crisprscope/02_PROKKA_speciesOFInterest/${speciesss}/ |grep ".faa" )
+
+echo -e "--proteome "${speciesss}"=/data/projects/p539_crisprscope/02_PROKKA_speciesOFInterest/"${speciesss}"/"${prokka_tmp} >> /data/projects/p539_crisprscope/05_BCGtree_new/log.txt
+head -1 /data/projects/p539_crisprscope/02_PROKKA_speciesOFInterest/${speciesss}//${prokka_tmp}
+done
+
+echo -e "--outdir /data/projects/p539_crisprscope/05_BCGtree_new/" >> /data/projects/p539_crisprscope/05_BCGtree_new/log.txt
+wc -l /data/projects/p539_crisprscope/05_BCGtree_new/log.txt
+##----------------------------------------
+##run bcgTree
+##----------------------------------------
+bcgTree.pl @/data/projects/p539_crisprscope/05_BCGtree_new/log.txt --threads 37
+```
+
+make nice tree in R.
+
+```{r }
+
+
+Braod_species_tree_raw <- read.nexus("data_submit/RAxML_bestTree_cleaned.final", tree.names = NULL, force.multi = FALSE)
+Braod_species_tree_raw$tip.label
+##--------START: changing names
+Renaming_lactobacillus_genus <- read_csv("data_submit/Renaming_lactobacillus_genus.csv")
+namechange <- setNames(Renaming_lactobacillus_genus$new_name,Renaming_lactobacillus_genus$old_name_with)
+
+Braod_species_tree_raw$tip.label <- plyr::revalue(Braod_species_tree_raw$tip.label,namechange)
+Braod_species_tree_raw$tip.label <- gsub("_", " " ,Braod_species_tree_raw$tip.label)
+##--------END: changing names
+
+
+gtree_01 <- ggtree(Braod_species_tree_raw) +
+  geom_tiplab(align = TRUE)+ coord_cartesian(clip = 'off') + #+ xlim(0, 1.8)+ # tiplabls aligned
+  geom_rootedge(rootedge = 0) +geom_treescale() + theme_tree2() 
+ #NO ROOT  
+  
+gtree_01
+```
+
+### Additional species info
+
+```{r }
+##------------------------------------
+#Abundance 
+##------------------------------------
+
+X20210428_metaphlan_final_species <- read_csv("data_submit/20210428_metaphlan_final_species.txt") %>% select(-counts)%>% select(-X1)  %>% rename("id"="species_new") 
+X20210428_metaphlan_final_species <- rbind(X20210428_metaphlan_final_species,c("Outgroup",0,0)) %>% as.data.frame()
+
+##--------START: changing names
+namechange <- setNames(Renaming_lactobacillus_genus$new_name,Renaming_lactobacillus_genus$old_name)
+
+X20210428_metaphlan_final_species$id <- plyr::revalue(X20210428_metaphlan_final_species$id,namechange)
+X20210428_metaphlan_final_species$id <- gsub("_", " " ,X20210428_metaphlan_final_species$id)
+X20210428_metaphlan_final_species$id <- plyr::revalue(X20210428_metaphlan_final_species$id,c("Streptococcus luteciae"="Streptococcus lutetiensis","Staphylococcus sciuri"="Mammaliicoccus sciuri","Propionibacterium acnes"="Cutibacterium acnes"))
+
+##--------END: changing names
+str(X20210428_metaphlan_final_species)
+Braod_species_tree_raw$tip.label %in% X20210428_metaphlan_final_species$id
+X20210428_metaphlan_final_species[which(!X20210428_metaphlan_final_species$id %in% Braod_species_tree_raw$tip.label),]
+Braod_species_tree_raw$tip.label[which(!Braod_species_tree_raw$tip.label %in% X20210428_metaphlan_final_species$id)]
+
+
+
+X20210428_metaphlan_final_species$median <- as.numeric(X20210428_metaphlan_final_species$median)
+
+p4 <- facet_plot(gtree_01, panel = 'Abundance', data = X20210428_metaphlan_final_species, 
+                geom = geom_barh, 
+                mapping = aes(x = median), width = 0.8, 
+                stat='identity' ) +xlim_expand(c(0,100), "Abundance")
+p4
+
+##------------------------------------
+#Prevalance 
+##------------------------------------
+
+X20210428_metaphlan_final_species$prevelance <- as.numeric(X20210428_metaphlan_final_species$prevelance)
+
+p5 <- facet_plot(p4, panel = 'Prevelance', data = X20210428_metaphlan_final_species, 
+                geom = geom_barh, 
+                mapping = aes(x = prevelance), width = 0.8, 
+                stat='identity' )+xlim_expand(c(0,100), "Prevelance") #+ xlim(0, 100)
+p5
+##-------------------------------------------
+#genome count
+##-------------------------------------------
+
+species_names <- read_delim("data_submit/genome_count_SEL26.txt",  ";", escape_double = FALSE, col_names = c("value", "id"),  trim_ws = TRUE, skip = 1) %>% select(id)
+
+genome_count_SEL186 <- read_csv("data_submit/export_genome_count_SEL185.csv", col_names =c("X1","value", "id"),  trim_ws = TRUE, skip = 1) %>% select(-X1) %>% add_column(category="NCBI")
+export_genome_count_SELDIALACT <- read_csv("data_submit/export_genome_count_SELDIALACT.csv", col_names = c("X1","value", "id"), skip = 1)  %>% select(-X1) %>% add_column(category="Dialact")
+
+genome_count_SEL186_final <- rbind(genome_count_SEL186,export_genome_count_SELDIALACT) %>% as.data.frame() %>% select(id,value,category)
+
+genome_count_SEL26_final <- genome_count_SEL186_final %>% filter(id %in% c("Leuconostoc_lactis","Streptococcus_thermophilus", "Lactobacillus_helveticus", "Lactococcus_lactis", "Brevibacterium_aurantiacum","Lactobacillus_acidophilus","Cutibacterium_acnes","Mammaliicoccus_sciuri" ,"Lactobacillus_delbrueckii" ,       "Leuconostoc_mesenteroides","Propionibacterium_freudenreichii" ,"Pediococcus_pentosaceus","Staphylococcus_equorum","Brevibacterium_linens", "Streptococcus_lutetiensis", "Corynebacterium_casei" ,"Bifidobacterium_animalis",  "Pediococcus_parvulus" ,"Leuconostoc_pseudomesenteroides", "Loigolactobacillus_coryniformis","Lacticaseibacillus_rhamnosus","Lacticaseibacillus_casei","Lactiplantibacillus_plantarum" ,"Limosilactobacillus_fermentum","Companilactobacillus_versmoldensis","Latilactobacillus_curvatus")
+)
+
+##--------START: changing names
+namechange <- setNames(Renaming_lactobacillus_genus$new_name,Renaming_lactobacillus_genus$old_name_with)
+
+genome_count_SEL26_final$id <- plyr::revalue(genome_count_SEL26_final$id,namechange)
+genome_count_SEL26_final$id <- gsub("_", " " ,genome_count_SEL26_final$id)
+
+##--------END: changing names
+
+Braod_species_tree_raw$tip.label %in% genome_count_SEL26_final$id
+genome_count_SEL26_final$id %in% Braod_species_tree_raw$tip.label
+
+genome_count_SEL26_final$value <- as.numeric(genome_count_SEL26_final$value)
+
+p6 <- facet_plot(p5, panel = 'Genome count', data = genome_count_SEL26_final, 
+                geom = geom_barh, 
+                mapping = aes(x = value,fill=category), width = 0.8, 
+                stat='identity' ) #+xlim_expand(c(0,500), 'Genome count')
+p6
+
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/species_tree_abundance_genome_count.pdf",width=10,height=6)
+
+# p6
+# dev.off()
+
+```
+
+## FastaANI
+
+Here, I calculate the Average nucleotide identity (ANI) between any two given genomes of all analysed species 
+
+```{bash}
+
+###---------------------------
+##make a list of locations of all Sterm and ldel genomes to comapre
+###---------------------------
+
+##-------------------------------all
+
+
+rm -r /data/projects/p539_crisprscope/fastani/
+mkdir -p /data/projects/p539_crisprscope/fastani/{20210123_run,log}
+for DBss in $(ls /data/projects/p539_crisprscope/01_data/20210123_assemblies/)
+do
+
+for datesss in $(ls /data/projects/p539_crisprscope/01_data/20210123_assemblies/${DBss}/)
+do
+
+#rm  /data/projects/p539_crisprscope/fastani/log/filenames_all_fastani.txt
+for speciesss in $(ls /data/projects/p539_crisprscope/01_data/20210123_assemblies/${DBss}/${datesss})
+do
+echo "===================================="
+echo ${speciesss}
+ ls /data/projects/p539_crisprscope/01_data/20210123_assemblies/${DBss}/${datesss}/${speciesss} |wc -l
+ ls /data/projects/p539_crisprscope/01_data/20210123_assemblies/${DBss}/${datesss}/${speciesss} |grep -c ".fna"
+ for genomessss in $(ls /data/projects/p539_crisprscope/01_data/20210123_assemblies/${DBss}/${datesss}/${speciesss})
+ do
+ 
+ genome_short=$(echo ${genomessss}|sed 's/.fna//g')
+echo -e "/data/projects/p539_crisprscope/01_data/20210123_assemblies/"${DBss}"/"${datesss}"/"${speciesss}"/"${genome_short}".fna"  >> /data/projects/p539_crisprscope/fastani/log/filenames_all_fastani.txt
+echo -e ${speciesss}"\t"${genome_short}  >> /data/projects/p539_crisprscope/fastani/log/filenames_all_description_genomes.txt
+
+  done
+done
+done
+done
+
+wc -l /data/projects/p539_crisprscope/fastani/log/filenames_all_description_genomes.txt
+wc -l /data/projects/p539_crisprscope/fastani/log/filenames_all_fastani.txt
+
+
+###---------------------------
+##fastaANI
+###---------------------------
+fastANI --fragLen 1000 -t 37 --ql /data/projects/p539_crisprscope/fastani/log/filenames_all_fastani.txt \
+  --rl /data/projects/p539_crisprscope/fastani/log/filenames_all_fastani.txt \
+  -o /data/projects/p539_crisprscope/fastani/20210123_run/20201219_ANI_output_all.txt
+
+```
+
+```{r}
+
+##----------------
+##sterm
+##----------------
+
+fastani_thibualt <- read_delim("data_submit/20201219_ANI_output_all.txt", "\t", escape_double = FALSE, col_names = FALSE,  trim_ws = TRUE) 
+genomeDescription <- read_delim("data_submit/filenames_all_description_genomes.txt",  "\t", escape_double = FALSE, col_names = FALSE, trim_ws = TRUE)
+
+table(genomeDescription$X1)
+table(genomeDescription$X1)
+genomeDescription$X1 <- plyr::revalue(genomeDescription$X1,c("Lactobacillus_delbrueckii_subsp_bulgaricus"="Lactobacillus_delbrueckii","Lactobacillus_delbrueckii_subsp_lactis"="Lactobacillus_delbrueckii","Lactococcus_lactis_subsp_lactis"="Lactococcus_lactis","Lactococcus_lactis_subsp_cremoris"="Lactococcus_lactis"))
+fastani_thibualt$AF <- (100*(fastani_thibualt$X4/fastani_thibualt$X5))
+
+
+fastani_thibualt$genome1 <- str_split_fixed(fastani_thibualt$X1, fixed("/"), 9)[,8] %>%  gsub(".fna","",.)
+fastani_thibualt$genome2 <- str_split_fixed(fastani_thibualt$X2, fixed("/"), 9)[,8] %>%  gsub(".fna","",.)
+
+fastani_thibualt_cleaned <- fastani_thibualt %>% rename("X3"="id") %>% select(c(genome1,genome2,id,AF))
+tmp1 <- merge(fastani_thibualt_cleaned,genomeDescription,by.x="genome1",by.y="X2") %>% rename("X1"="species_genome1")
+fastani_thibualt_final <- merge(tmp1,genomeDescription,by.x="genome2",by.y="X2") %>% rename("X1"="species_genome2")
+
+
+ fastani_thibualt_final%>%  group_by(species_genome1,species_genome2)  %>%  dplyr::summarize(median = median(id)) 
+
+
+
+```
+
+```{bash}
+count=0
+for speciesss in $(ls /data/projects/p539_crisprscope/01_data/20201219_all)
+do
+echo "===================================="
+echo ${speciesss}
+ls /data/projects/p539_crisprscope/01_data/20201219_all/${speciesss}/ |wc -l
+zss=$(ls /data/projects/p539_crisprscope/01_data/20201219_all/${speciesss}/ |wc -l)
+
+ count=$((count+zss))
+
+done
+echo $count
+```
+
+## Defense mechanism diversity
+
+In the bioinfics scirpt you find how we identified the defense mechanisms. 
+Here, we show the analysis of the data. 
+
+```{r }
+pathway_identification_species <- read_csv("data_submit/pathway_species.txt")
+
+#order the pathways according to these
+pathway_identification_species$mechanism_final  = factor(pathway_identification_species$mechanism_final , levels=c(
+  "R-M-I", "R-M-II", "R-M-IIG", "R-M-III", "R-M-IV",
+  "BREX","Disarm-I","Disarm-II", 
+  "Druantia-I",  "Druantia-II","Druantia-III","Hachiman","Kiwa","Lamassu","Shedu","Thoeris","Zorya-I","Zorya-II","Wadjet-I","Septu",
+  "CBASS","Abi",
+  "GTPase","dNTPaminase","Retrons"
+  
+))
+
+##-------------------------------
+
+ggheatmap <- ggplot(pathway_identification_species, aes(y=species, x=mechanism_final, fill = percent_species))+
+ geom_tile(color = "white",size=1.1)+
+ scale_fill_gradient2(low = "white", high = "red", mid = "white",
+   midpoint = 0, limit = c(-100,100), space = "Lab",
+   name="max growth") +theme_classic()+
+  #theme_minimal()+ # minimal theme
+  scale_x_discrete(position = "top") +
+  # labs(x=expression(italic("S. thermophilus")),y=expression(italic("L. delbrueckii")))+
+ theme(axis.text.y = element_text(size=7),
+      axis.text.x = element_text(angle = 45,vjust=1,
+    size = 12, hjust = 0),axis.title=element_blank(), 
+    legend.title = element_blank())
+ # coord_fixed()
+# Print the heatmap
+ print(ggheatmap)
+  
+##=========================
+##add CRISPR
+##=========================
+pathway_identification_species_plot <- pathway_identification_species %>% select(species,mechanism_final,percent_species)
+
+StrainCasType_subtypes <- read_csv("data_submit/StrainCasType_withSubtype.csv") %>% dplyr::rename(., "species"="Organism")%>% mutate(mechanism_final=paste0("CRISPR type ",Type,"_",Subtype)) %>% select(species,Strain,mechanism_final)%>% filter(mechanism_final!="CRISPR type III_B")
+
+StrainCasType_general_CRISPR <- read_csv("data_submit/StrainCasType_withSubtype.csv") %>% rename(., "species"="Organism")%>% mutate(mechanism_final="CRISPR") %>% select(species,Strain,mechanism_final)
+
+StrainCasType <- rbind(StrainCasType_subtypes,StrainCasType_general_CRISPR)
+
+StrainCasType <- StrainCasType %>% group_by(species,Strain,mechanism_final) %>% summarise(count=n() ) %>% select(-count)
+StrainCasType_counts <- StrainCasType %>% group_by(species,mechanism_final) %>% summarise(counts=n())
+
+StrainCasType_final <- merge(StrainCasType_counts,species_counts,by="species") %>% mutate(percent_species=100*(counts.x/counts.y))%>% select(species,mechanism_final,percent_species)
+
+Strain_all_Type_final <- rbind(pathway_identification_species_plot,StrainCasType_final)
+Strain_all_Type_final$mechanism_final  = factor(Strain_all_Type_final$mechanism_final , levels=c(
+  "R-M-I", "R-M-II", "R-M-IIG", "R-M-III", "R-M-IV",
+  "BREX","Disarm-I","Disarm-II", 
+  "Druantia-I",  "Druantia-II","Druantia-III","Hachiman","Kiwa","Lamassu","Shedu","Thoeris","Zorya-I","Zorya-II","Wadjet-I","Septu",
+  "CBASS","Abi",
+  "GTPase","dNTPaminase","Retrons",
+  #"CRISPR type I",  "CRISPR type II", "CRISPR type III"
+  "CRISPR","CRISPR type I_B","CRISPR type I_C","CRISPR type I_E","CRISPR type I_G","CRISPR type II_A","CRISPR type II_C","CRISPR type III_A"
+))
+
+##--------START: changing names
+Renaming_lactobacillus_genus <- read_csv("data_submit/Renaming_lactobacillus_genus.csv")
+namechange <- setNames(Renaming_lactobacillus_genus$new_name,Renaming_lactobacillus_genus$old_name_with)
+
+Strain_all_Type_final$species <- plyr::revalue(Strain_all_Type_final$species,namechange)
+Strain_all_Type_final$species <- gsub("_", " " ,Strain_all_Type_final$species)
+
+##--------END: changing names
+
+Strain_all_Type_final %>% filter(mechanism_final=="CRISPR")
+
+ggheatmap <- ggplot(Strain_all_Type_final, aes(y=species, x=mechanism_final, fill = percent_species))+
+ geom_tile(color = "white",size=1.1)+
+ scale_fill_gradient2(low = "white", high = "red", mid = "white",
+   midpoint = 0, limit = c(-100,100), space = "Lab",
+   name="max growth") +theme_classic()+
+  #theme_minimal()+ # minimal theme
+  scale_x_discrete(position = "top") +
+  # labs(x=expression(italic("S. thermophilus")),y=expression(italic("L. delbrueckii")))+
+ theme(axis.text.y = element_text(size=7),
+      axis.text.x = element_text(angle = 45,vjust=1,
+    size = 12, hjust = 0),axis.title=element_blank(), 
+    legend.title = element_blank())
+ # coord_fixed()
+# Print the heatmap
+print(ggheatmap)
+
+##----------------------------------
+#count mechanisms
+
+unique(pathway_identification_species$mechanism_final)
+
+sum(pathway_identification_species$Present)
+
+StrainCasType_generel <- StrainCasType %>% filter(mechanism_final=="CRISPR") 
+table(StrainCasType_generel$species)
+
+StrainCasType_nongenerel <- StrainCasType %>% filter(mechanism_final!="CRISPR") 
+tmp <- StrainCasType_nongenerel %>% select(-mechanism_final) %>% group_by(species,Strain) %>% summarise(countsss=n())
+table(tmp$countsss)
+
+(121+49+1)/831
+
+tmp2 <- tmp %>% filter(countsss>1)
+table(tmp2$species)/(121+49+1) %>% sort()
+
+##======================================================
+###--------------------------make discrete
+##======================================================
+
+ggplot(Strain_all_Type_final,aes(x=percent_species))+theme_classic()+geom_histogram()+geom_vline(xintercept = c(10,90))
+
+Strain_all_Type_final$category <- ifelse(Strain_all_Type_final$percent_species==0,"NA",ifelse(Strain_all_Type_final$percent_species<10,"low",ifelse(Strain_all_Type_final$percent_species<90,"intermediate","high")))
+
+Strain_all_Type_final$category = factor(Strain_all_Type_final$category, levels=c("NA","low","intermediate","high"))
+
+colorsss <- rev(c("#E72405","#FB9B19","#F7F808","white"))
+
+ggheatmap_02 <- ggplot(Strain_all_Type_final, aes(y=species, x=mechanism_final, fill = category))+
+ geom_tile(color = "white",size=1.1)+
+ scale_fill_manual(values = colorsss)+
+  theme_classic()+
+  scale_x_discrete(position = "top") +
+ theme(axis.text.y = element_text(size=7),
+      axis.text.x = element_text(angle = 45,vjust=1,
+    size = 12, hjust = 0),axis.title=element_blank(), 
+    legend.title = element_blank())
+
+# Print the heatmap
+print(ggheatmap_02)
+
+Strain_all_Type_final_sub <- Strain_all_Type_final %>% filter(category %in% c("low","intermediate","high")) 
+
+colorsssss <- rev(c("#E72405","#FB9B19","#F7F808"))
+
+ggplot(Strain_all_Type_final_sub,aes(x=species,fill=category))+theme_classic()+geom_bar()+ scale_fill_manual(values = colorsssss)+coord_flip()
+
+```
+
+## core, accessory counts 
+
+Here, I visulise the absolut and relative abundance of core, accesory and cloud defense mechanisms. 
+
+```{r }
+####--------------------------------------------
+#add number of core,accessory and cloud immune systems
+####--------------------------------------------
+
+Strain_all_Type_final_sub_01 <- read_csv("data_submit/Strain_all_Type_final_sub_data.csv")
+
+colorsssss <- rev(c("#E72405","#FB9B19","#F7F808"))
+
+ggplot(Strain_all_Type_final_sub_01,aes(x=species,fill=category))+theme_classic()+geom_bar()+ scale_fill_manual(values = colorsssss)
+
+Braod_species_tree_raw$tip.label
+unique(Strain_all_Type_final_sub_01$species)
+
+Strain_all_Type_final_sub_01_prep <- Strain_all_Type_final_sub_01 %>% group_by(species,category) %>% summarise(value=n())
+
+Strain_all_Type_final_sub_01_prep$category = factor(Strain_all_Type_final_sub_01_prep$category, levels=c("low","intermediate","high"))
+
+p12 <- gtree_01 + geom_facet(panel = 'bar', data = Strain_all_Type_final_sub_01_prep, geom = geom_bar, 
+                 mapping = aes(x = value, fill = as.factor(category)), 
+                 orientation = 'y', width = 0.8, stat='identity') +scale_fill_manual(values =colorsssss )
+
+facet_widths(p12, widths = c(1, 2))
+
+# pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/pan_immunity_count.pdf",width=10,height=6)
+
+# facet_widths(p12, widths = c(1, 2))
+
+# dev.off()
+
+Strain_all_Type_final_sub_01_prep_02 <- Strain_all_Type_final_sub_01 %>% group_by(species,category) %>% summarise(ind=n()) %>% group_by(species) %>% summarise(total=sum(ind)) %>% left_join(.,Strain_all_Type_final_sub_01_prep) %>% mutate(percent=100*(value/total))
+
+Strain_all_Type_final_sub_01_prep$category = factor(Strain_all_Type_final_sub_01_prep$category, levels=c("low","intermediate","high"))
+
+p13 <- gtree_01 + geom_facet(panel = 'bar', data = Strain_all_Type_final_sub_01_prep_02, geom = geom_bar, 
+                 mapping = aes(x = percent, fill = as.factor(category)), 
+                 orientation = 'y', width = 0.8, stat='identity') +scale_fill_manual(values =colorsssss )
+
+facet_widths(p13, widths = c(1, 2))
+
+
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/pan_immunity_frequency.pdf",width=10,height=6)
+
+p13
+# dev.off()
+```
+
+
+## look at non-CRISPR species
+
+```{r}
+c("Brevibacterium_aurantiacum", "Brevibacterium_linens", "Companilactobacillus_versmoldensis", "Lactococcus_lactis","Leuconostoc_mesenteroides")
+dim(pathway_identification_species)
+sum(pathway_identification_species$Present)
+pathway_identification_species$grouping <- ifelse(pathway_identification_species$species %in% c("Brevibacterium_aurantiacum", "Brevibacterium_linens", "Companilactobacillus_versmoldensis", "Lactococcus_lactis","Leuconostoc_mesenteroides"),"No CRISPR","CRISPR")
+
+crisprss <- pathway_identification_species %>% filter(percent_species>0) %>% ungroup()%>% group_by(species,grouping) %>% dplyr::summarise(systems=n())
+
+crisprss
+
+res <- wilcox.test(systems ~ grouping, data = crisprss)
+res
+
+women_weight <- crisprss %>% filter(grouping=="CRISPR") %>% ungroup() %>% select(systems) %>% unlist() %>% as.vector()
+men_weight <- crisprss %>% filter(grouping!="CRISPR") %>% ungroup() %>% select(systems) %>% unlist()%>% as.vector()
+res <- wilcox.test(women_weight, men_weight)
+res$p.value
+
+t.test(women_weight,men_weight)
+
+phage_defense_plot <- ggplot(crisprss,aes(x=grouping,y=systems))+geom_boxplot()+theme_classic()+labs(x="",y="Phage defense systems",title = "species-level")#+geom_jitter()
+phage_defense_plot
+
+
+phage_defense_plot <- ggplot(crisprss,aes(x=grouping,y=systems,fill=grouping,color=grouping))+geom_violin(alpha=0.6,adjust=0.8)+theme_classic()+labs(x="",y="Phage defense systems")+ggforce::geom_sina(alpha=0.8)+labs(x="",y="Phage defense systems",title = "species-level")+ stat_compare_means()
+
+phage_defense_plot
+
+  # png("~/Desktop/Projects/2020_CRISPRscope/Plots/phage_defense_system_count.png", width = 1200, height = 1500,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+phage_defense_plot
+ # dev.off()
+ 
+ ###----------------------------------------
+ #per strain
+  ###----------------------------------------
+ 
+ 
+```
+
+do this per strain
+
+```{r}
+
+pathway_identification
+table(pathway_identification$mechanism_final)
+
+StrainCasType_tmp <- StrainCasType %>% filter(mechanism_final=="CRISPR")
+
+StrainCasType_tmp_02 <- StrainCasType %>% mutate(genome=paste0(species,"_",Strain,".faa")) %>% ungroup() %>% select(genome,mechanism_final) %>% filter(mechanism_final=="CRISPR")
+pathway_identification_tmp_02 <- pathway_identification %>% filter(Completness=="Yes")%>% ungroup() %>% select(genome,mechanism_final)
+
+# merge(pathway_identification,StrainCasType_tmp,by=c(""))
+
+all_defense <- rbind(pathway_identification_tmp_02,StrainCasType_tmp_02)  %>% add_column(all=1)%>% spread(., mechanism_final, all) %>%replace(is.na(.), all_defense0) 
+
+colnames(all_defense)
+ncol(all_defense)
+
+
+all_defense$numDefense <- rowSums(all_defense[,c(2:4,6:24)])
+
+all_defense$CRISPR_presence <- ifelse(all_defense$CRISPR=="0","No CRISPR-containing\nstrains","CRISPR-containing\nstrains")
+
+all_defense_crisprsss <- all_defense %>% filter(!species %in% c("Brevibacterium_aurantiacum", "Brevibacterium_linens", "Companilactobacillus_versmoldensis", "Lactococcus_lactis","Leuconostoc_mesenteroides"))
+
+# phage_defense_plot_strain_02 <- ggplot(all_defense,aes(x=CRISPR_presence,y=numDefense))+geom_boxplot()+theme_classic()+labs(x="",y="Phage defense systems",title = "strain-level")+ stat_compare_means()
+
+phage_defense_plot_strain_02 <- ggplot(all_defense,aes(x=CRISPR_presence,y=numDefense,fill=CRISPR_presence,color=CRISPR_presence))+geom_violin(alpha=0.6,adjust=1.7)+theme_classic()+labs(x="",y="Phage defense systems")+ggforce::geom_sina(alpha=0.2)+labs(x="",y="Phage defense systems",title = "strain-level")+ stat_compare_means()+geom_boxplot(color="black",alpha=0,width=.25)
+
+phage_defense_plot_strain_02
+
+  # png("~/Desktop/Projects/2020_CRISPRscope/Plots/phage_defense_system_count_species_strains.png", width = 2400, height = 1500,res=300)
+     # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//phage_defense_system_count_species_strains.pdf",width=,height=4)
+
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+(phage_defense_plot+theme(legend.position = "none"))+(phage_defense_plot_strain_02+theme(legend.position = "none"))
+ # dev.off()
+ 
+  ###----------------------------------------
+ #per species 
+  ###----------------------------------------
+ 
+ #add species info
+ 
+ all_defense$Genus <- str_split_fixed(all_defense$genome, fixed("_"), 3)[,1]
+all_defense$spec <- str_split_fixed(all_defense$genome, fixed("_"), 3)[,2]
+all_defense$species <- paste(all_defense$Genus,all_defense$spec,sep="_")
+ 
+table(all_defense$species)
+
+
+ all_defense$grouping <- ifelse(all_defense$species %in% c("Brevibacterium_aurantiacum", "Brevibacterium_linens", "Companilactobacillus_versmoldensis", "Lactococcus_lactis","Leuconostoc_mesenteroides"),"No CRISPR-containing\nspecies","CRISPR-containing\nspecies")
+
+
+ phage_defense_plot_species <- ggplot(all_defense,aes(x=grouping,y=numDefense))+geom_boxplot()+theme_classic()+labs(x="",y="Phage defense systems",title = "species-level")+ stat_compare_means()#+geom_jitter(alpha=0.1)
+
+phage_defense_plot_species
+
+
+phage_defense_plot_species <- ggplot(all_defense,aes(x=grouping,y=numDefense,fill=grouping,color=grouping))+geom_violin(alpha=0.6,adjust=1.7)+theme_classic()+labs(x="",y="Phage defense systems")+ggforce::geom_sina(alpha=0.2)+labs(x="",y="Phage defense systems",title = "species-level")+ stat_compare_means()+geom_boxplot(color="black",alpha=0,width=.25)
+
+phage_defense_plot_species
+
+phage_defense_plot_species+phage_defense_plot_strain_02
+ (phage_defense_plot_species+theme(legend.position = "none"))+(phage_defense_plot_strain_02+theme(legend.position = "none"))
+
+  # png("~/Desktop/Projects/2020_CRISPRscope/Plots/phage_defense_system_count_species_strains.png", width = 2400, height = 1500,res=300)
+   pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//phage_defense_system_count_species_strains.pdf",width=,height=3.7)
+    (phage_defense_plot_species+theme(legend.position = "none"))+(phage_defense_plot_strain_02+theme(legend.position = "none"))
+
+# phage_defense_plot+phage_defense_plot_strain_02
+ dev.off()
+  
+```
+
+## PCA defense mechanisms
+
+Here, I try to cluster the the strains according to the defenese mechanisms presence
+
+```{r}
+ defense_systems <-  read_csv("data_submit/pathway_strain.txt") %>% filter(Completness=="Yes")%>% select(species,genome,mechanism_final)
+
+
+StrainCasType_subtypes <- read_csv("data_submit/StrainCasType_withSubtype.csv") %>% rename(., "species"="Organism")%>% mutate(mechanism_final=paste0("CRISPR type ",Type,"_",Subtype))%>% filter(mechanism_final!="CRISPR type III_B")  %>% mutate(genome=paste0(species,"_",Strain,".faa"))  %>% select(species,genome,mechanism_final)
+
+
+defense_systems_complete <- rbind(defense_systems,StrainCasType_subtypes) %>% mutate(presence=1)
+
+defense_systems_complete <- rbind(defense_systems,StrainCasType_subtypes) %>% mutate(presence=1) %>% filter(!species %in% c("Companilactobacillus_versmoldensis","Pediococcus_parvulus","Corynebacterium_casei","Brevibacterium_linens","Loigolactobacillus_coryniformis"))
+#,"Mammaliicoccus_sciuri","Staphylococcus equorum"
+
+  defense_systems_complete_wide <- spread(defense_systems_complete, mechanism_final, presence)%>%replace(is.na(.), 0) 
+table(defense_systems_complete_wide$species)
+  defense_systems_species <- defense_systems_complete_wide %>% select(genome,species)
+
+  
+defense_systems_complete_wide_preped <- defense_systems_complete_wide %>% select(-species) %>% remove_rownames()%>% column_to_rownames(., var = "genome")
+
+
+
+df_pca <- prcomp(defense_systems_complete_wide_preped)
+
+plot(df_pca$x[,1], df_pca$x[,2])
+
+metabolo.sum <- summary(df_pca)
+metabolo.sum
+metabolo.sum <- metabolo.sum$importance %>% as.data.frame()
+
+ploting_data <- df_pca$x %>% as.data.frame()
+ploting_data$genome <- rownames(ploting_data)
+ploting_data_final <-  merge(ploting_data,defense_systems_species,by="genome")
+
+table(ploting_data_final$species)
+
+pca0 <- ggbiplot(df_pca,var.axes=FALSE,obs.scale = 1)+theme_classic()+labs(title="grouping by biological replicates")+theme(legend.position = "none")
+pca0
+
+pca1 <- ggbiplot(df_pca,var.axes=FALSE,groups=ploting_data_final$species,obs.scale = 1,alpha=0.3,ellipse=TRUE)+theme_classic()+theme(legend.position = "right")
+pca1
+
+species_colors <- read_delim("data_submit/species_colors.txt", "\t", escape_double = FALSE, trim_ws = TRUE)
+
+###---------------following names are used in IMG
+unique(species_colors$species)
+species_colors$species <- plyr::revalue(species_colors$species,c(
+ "Propionibacterium acnes"="Cutibacterium acnes"  , 
+"Lactobacillus plantarum" ="Lactiplantibacillus plantarum",
+# "Lactobacillus_versmoldensis"     = "Companilactobacillus_versmoldensis",
+"Lactobacillus curvatus"          = "Latilactobacillus curvatus",
+ "Lactobacillus rhamnosus"         = "Lacticaseibacillus rhamnosus",
+# "Lactobacillus_coryniformis"      = "Loigolactobacillus_coryniformis",
+ # "Lactobacillus_rhamnosus"         = "Mammaliicoccus sciuri",
+ "Streptococcus luteciae"         = "Streptococcus lutetiensis",
+"Lactobacillus fermentum"         = "Limosilactobacillus fermentum",
+ "Lactobacillus zeae"              = "Lacticaseibacillus casei"))
+unique(species_colors$species)
+
+table(species_colors$species)
+
+ploting_data_final$species_new <- gsub("_"," ",ploting_data_final$species)
+
+
+unique(species_colors$species)
+unique(ploting_data_final$species)
+unique(ploting_data_final$species_new)
+
+nrow(species_colors)
+unique(ploting_data_final$species_new) %>% length()
+
+species_colors_02 <- species_colors %>% filter(species %in% unique(ploting_data_final$species_new) )
+nrow(species_colors_02)
+unique(ploting_data_final$species_new) %>% length()
+
+unique(ploting_data_final$species_new)[which(!unique(ploting_data_final$species_new) %in% species_colors_02$species)]
+
+species_colors_03 <- rbind(species_colors_02,c("Mammaliicoccus sciuri","grey"))
+
+
+
+target <- unique(ploting_data_final$species_new) %>% as.vector
+
+table(ploting_data_final$species_new)
+
+species_colors_03 <- species_colors_03[match(target, species_colors_03$species),]
+ploting_data_final$species_new = factor(ploting_data_final$species_new, levels=species_colors_03$species)
+
+pca2 <- ggbiplot(df_pca,var.axes=FALSE,groups=ploting_data_final$species_new,obs.scale = 1,alpha=0.3,size=1.2,ellipse=TRUE)+theme_classic()+theme(legend.position = "right")+scale_fill_manual(values =species_colors_03$color )+scale_color_manual(values =species_colors_03$color )
+pca2
+
+pca3 <- ggbiplot(df_pca,var.axes=FALSE,groups=ploting_data_final$species_new,obs.scale = 1,alpha=0.3,size=1.2,ellipse=TRUE)+theme_classic()+theme(legend.position = "none")+scale_fill_manual(values =species_colors_03$color )+scale_color_manual(values =species_colors_03$color )
+pca3
+
+  # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//pca_defense_systems.pdf",width=6,height=3)
+# pca3
+ # dev.off()
+
+
+# ##-----------tsne
+# library(Rtsne)
+# tsne.norm = Rtsne(pca.norm$x, pca = FALSE)
+# tsne_plot <- as.data.frame(tsne.norm$Y)
+# tsne_plot$site <- sample_relative_safe_final_tsne_safe_sterm_woDuplicates[,1]
+# tsne_plot$contig <- paste(str_split_fixed(tsne_plot$site, "_", 5)[,1],str_split_fixed(tsne_plot$site, "_", 5)[,2],sep = "_")
+# 
+# 
+# tsne_plot$species <- tsne_plot$contig
+# 
+# ##plot blank
+# ggplot(tsne_plot,aes(x=V1,y=V2))+geom_point()
+
+```
+
+## within species defense decrease
+
+run previous chunk before
+```{r}
+defense_systems_complete_wide
+
+
+ ANI_CUSTOM_OUTPUT_21072021 <- read_csv("data_submit/ANI_perArray_sharedSpacers_newer.csv") 
+
+table(ANI_CUSTOM_OUTPUT_21072021$Organism1)
+
+ANI_CUSTOM_OUTPUT_21072021 <- read_csv("data_submit/ANI_CUSTOM_OUTPUT_21072021.csv") %>% mutate(genome1=strain_query,genome2=strain_ref) %>% select(genome1,genome2,ANI)
+
+fastani_thibualt <- read_delim("data_submit/20201219_ANI_output_all.txt", "\t", escape_double = FALSE, col_names = FALSE,  trim_ws = TRUE)
+
+fastani_thibualt$genome1 <- str_split_fixed(fastani_thibualt$X1, fixed("/"), 9)[,8] %>%  gsub(".fna","",.)
+fastani_thibualt$genome2 <- str_split_fixed(fastani_thibualt$X2, fixed("/"), 9)[,8] %>%  gsub(".fna","",.)
+
+fastani_thibualt_cleaned <- fastani_thibualt %>% mutate(ANI=X3) %>% select(c(genome1,genome2,ANI="X3"))
+
+defense_systems_complete_wide <- defense_systems_complete_wide %>% mutate(strain=gsub(".*_","",genome))  %>% mutate(strain=gsub(".faa$","",strain))
+
+table(defense_systems_complete_wide$species)
+
+
+fastani_thibualt_cleaned_total <- rbind(ANI_CUSTOM_OUTPUT_21072021,fastani_thibualt_cleaned) %>% unique()
+
+
+speciesss="Bifidobacterium_animalis"
+strainName_1="GCF.000025245.2"
+strainName_2="GCF.000025245.2"
+
+
+
+defense_systems_complete_wide$strain %in% fastani_thibualt_cleaned$genome1 %>% length()
+defense_systems_complete_wide$strain %in% fastani_thibualt_cleaned$genome1 %>% sum()
+defense_systems_complete_wide_avail <- defense_systems_complete_wide[(defense_systems_complete_wide$strain %in% fastani_thibualt_cleaned_total$genome2),]
+
+defense_systems_complete_wide_avail$strain %in% fastani_thibualt_cleaned_total$genome1%>% length()
+
+# table(defense_systems_complete_wide_avail$species)^2
+table(defense_systems_complete_wide_avail$species)
+
+raw_Output <- data.frame()
+final_Output <- data.frame()
+
+for (speciesss in unique(defense_systems_complete_wide_avail$species)) {
+  print(speciesss)
+  
+  tmp1 <- defense_systems_complete_wide_avail %>% filter(species==speciesss)
+  
+  numGen=unique(tmp1$strain) %>% length()
+  # counter_1=1
+  counter_2=unique(tmp1$strain) %>% length()
+  
+  # ifelse(numGen<80,vector=1:numGen, sample(1:numGen, 80))
+  if (numGen<30) {
+    vector <- 1:numGen
+  }   else {
+vector <- sample(1:numGen, 30)}
+ 
+  
+  for (strains1 in vector) {
+    
+    
+    strainName_1=unique(tmp1$strain)[strains1]
+    
+    for (strains2 in 1:counter_2) {
+      
+          strainName_2=unique(tmp1$strain)[strains2]
+      # counter_2=counter_2-1
+
+     
+    
+      
+      ##----analysis
+      
+     tmp2 <- tmp1 %>% filter(strain %in% c(strainName_1,strainName_2)) %>% select(-species,-genome,-strain) %>% colSums() %>% table() %>% data.frame() %>% rename(c("matching"=".","abundance"="Freq")) %>% mutate(species=speciesss,strain1=strainName_1,strain2=strainName_2)
+     raw_Output <- rbind(raw_Output,tmp2)
+     
+     tmp3 <- tmp2 %>% filter(matching %in% c(0,2)) %>% pull(abundance) %>% sum()
+      
+# tmp5 <-  ANI_CUSTOM_OUTPUT_21072021 %>% filter((Strain1==strainName_1 & Strain2==strainName_2) | (Strain1==strainName_2 & Strain2==strainName_1) )   %>% pull(ANI) %>% median()
+
+ # fastani_thibualt_cleaned_total %>% filter((genome1==strainName_1))
+     tmp5 <- fastani_thibualt_cleaned_total %>% filter((genome1==strainName_1 & genome2==strainName_2) | (genome1==strainName_2 & genome2==strainName_1)) %>% pull(ANI) %>% median()
+
+    # tmp5 <- ANI_CUSTOM_OUTPUT_21072021 %>% filter((strain_query==strainName_1 & strain_ref==strainName_2) | (strain_query==strainName_2 & strain_ref==strainName_1)) %>% pull(ANI) %>% median()
+
+               tmp4 <- data.frame(species=speciesss,strain1=strainName_1,strain2=strainName_2,numberMatching=tmp3,percentMatch=100*(tmp3/29),ANI=tmp5)
+     final_Output  <- rbind(final_Output,tmp4)
+     print(tmp4)
+  }
+    
+     counter_2=(counter_2-1)
+  }
+  
+  
+}
+
+
+  # write.csv(final_Output,file="~/Desktop/Projects/2020_CRISPRscope/data/fastani_immunesystem_correlation_01.csv")
+
+  
+
+final_Output %>% nrow()
+final_Output %>% filter(!is.na(ANI))%>% nrow()
+
+ANI_CUSTOM_OUTPUT_21072021 %>% filter(species_query==speciesss) %>% pull(strain_query) %>% table() %>% length()
+```
+
+
+```{r}
+###--------------------------------------------------plot
+final_Output_cleaned <- read_csv("data_submit/fastani_immunesystem_correlation_01.csv")
+
+
+final_Output_cleaned_sub <- final_Output_cleaned %>% filter(ANI>97.5)
+
+ggplot(final_Output_cleaned_sub,aes(x=ANI,y=percentMatch))+geom_point(alpha=0.1)+facet_wrap(~species,scales = "free")+theme_classic()+geom_smooth(method='lm')
+
+
+ggplot(final_Output_cleaned_sub,aes(x=ANI,y=percentMatch))+geom_point(alpha=0.1)+theme_classic()+geom_smooth(method='lm')
+
+
+# ggplot(final_Output_cleaned_sub,aes(y=ANI,x=as.character(percentMatch)))+geom_boxplot()+facet_wrap(~species)+theme_classic() + theme(axis.text.x = element_text(angle = 45,vjust=1))
+    
+
+
+###--------------------------------------------------violin
+
+final_Output_cleaned_sub_above <- final_Output_cleaned_sub %>% filter(percentMatch>75) %>% mutate(numberDismatching=29-numberMatching)%>% filter(numberDismatching<6)
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(percentMatch)))+geom_point(alpha=0.1)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(percentMatch)))+geom_violin()+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(percentMatch)))+geom_boxplot()+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(percentMatch)))+geom_jitter(alpha=0.1)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')
+
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(numberDismatching)))+geom_jitter(alpha=0.1)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(numberDismatching)))+geom_jitter(alpha=0.1)+geom_violin()+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')
+
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(numberDismatching)))+geom_jitter(alpha=0.1)+geom_violin()+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')+facet_wrap(~species)
+table(final_Output_cleaned_sub_above$numberDismatching)
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=as.factor(numberDismatching)))+geom_jitter(alpha=0.1)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')+facet_wrap(~species)
+
+ggplot(final_Output_cleaned_sub_above,aes(y=ANI,x=(numberDismatching)))+geom_jitter(alpha=0.1)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')+facet_wrap(~species)
+
+
+species_of_interest <- table(final_Output_cleaned_sub_above$species) %>% data.frame() %>% filter(Freq>500) %>% filter(!Var1 %in% c("Bifidobacterium_animalis", "Lactobacillus_acidophilus"))%>% pull(Var1) %>% as.character() 
+
+final_Output_cleaned_sub_above_dom <- final_Output_cleaned_sub_above %>% filter(species %in% species_of_interest)
+
+ggplot(final_Output_cleaned_sub_above_dom,aes(y=ANI,x=(numberDismatching)))+geom_jitter(alpha=0.1)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')+facet_wrap(~species)
+ggplot(final_Output_cleaned_sub_above_dom,aes(y=ANI,x=(numberDismatching)))+geom_jitter(alpha=0.05)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+geom_smooth(method='lm')
+
+
+##---------------------------------------------------
+#split
+##---------------------------------------------------
+my.formula <- y ~ x
+library(ggpmisc)
+plot <- ggplot(final_Output_cleaned_sub_above_dom,aes(x=numberDismatching,y=ANI))+geom_jitter(alpha=0.05)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+
+    scale_y_continuous(limit=c(97.5,100))+
+geom_smooth(method="lm",se = FALSE,color="blue",linetype = "dashed")+
+  stat_poly_eq(formula = my.formula,
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+               parse = TRUE,)
+
+
+plot
+
+model <- lm(ANI ~ numberDismatching, data = final_Output_cleaned_sub_above_dom)
+model
+summary(model)
+#-------------------important subtypes
+###suptypes 
+
+CRISPR_spacer_coverage_filtered_subs <- CRISPR_spacer_coverage_filtered %>% filter(Subtype %in% c("I-E","I-C","II-C","I-G","II-A","III-A"))
+
+  
+plot2 <- ggplot(final_Output_cleaned_sub_above_dom,aes(x=numberDismatching,y=ANI,color=species))+geom_jitter(alpha=0.05)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+
+# coord_trans(y="log2",x="log2")+
+    # scale_x_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  scale_y_continuous(limit=c(97.5,100))+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  # labs(x="Spacer (cpm)",y="Protospacers  (cpm)")+
+geom_smooth(method="lm",se = FALSE)
+
+plot2
+
+plot+plot2
+
+colorDataFrame <- data.frame(species= c( "Lactobacillus acidophilus",
+"Lactobacillus fermentum", "Pediococcus parvulus",
+"Bifidobacterium animalis", "Brevibacterium aurantiacum", "Lactobacillus versmoldensis",
+"Leuconostoc lactis", "Corynebacterium casei", "Pediococcus pentosaceus",
+"Propionibacterium freudenreichii", "Streptococcus luteciae",
+"Lactobacillus rhamnosus", "Lactobacillus coryniformis", "Lactobacillus curvatus",
+"Brevibacterium linens", "Leuconostoc pseudomesenteroides", "Lactobacillus plantarum",
+"Staphylococcus sciuri", "Leuconostoc mesenteroides", "Propionibacterium acnes",
+"Staphylococcus equorum", "Lactobacillus casei", "Lactococcus lactis",
+"Lactobacillus helveticus", "Lactobacillus delbrueckii", "Streptococcus thermophilus"
+),
+color= c("#fdc2b496","#a4778bff","#a3758a64","#17c3b2ff","#16c3b396","#a7c5da4b","#ff6d584b","grey","#a3768aaf","#61988eff","#007ea796","#a7c5da96","#eeabc4ff","#eeaac396","#14c2b14b","#ff6f59ff","#a3758a32","#c8beb7ff","#ff6e5896","grey","grey","#a7bed3ff","#eeba0bff","#fcc2b44b","#fdc2b5ff","#007fa6ff"))
+# # 17c3b2ff
+
+colorDataFrame$species <- plyr::revalue(colorDataFrame$species,c(
+ "Propionibacterium acnes"="Cutibacterium acnes"  , 
+"Lactobacillus plantarum" ="Lactiplantibacillus plantarum",
+# "Lactobacillus_versmoldensis"     = "Companilactobacillus_versmoldensis",
+"Lactobacillus curvatus"          = "Latilactobacillus curvatus",
+ "Lactobacillus rhamnosus"         = "Lacticaseibacillus rhamnosus",
+# "Lactobacillus_coryniformis"      = "Loigolactobacillus_coryniformis",
+ # "Lactobacillus_rhamnosus"         = "Mammaliicoccus sciuri",
+ "Streptococcus luteciae"         = "Streptococcus lutetiensis",
+"Lactobacillus fermentum"         = "Limosilactobacillus fermentum",
+ "Lactobacillus zeae"              = "Lacticaseibacillus casei"))
+# unique(species_colors$species)
+
+colorDataFrame$species <- gsub(" ","_",colorDataFrame$species)
+colorDataFrame_interest <-colorDataFrame %>% filter(species %in% species_of_interest)
+
+colorDataFrame_interest$species = factor(colorDataFrame_interest$species, levels=colorDataFrame_interest$species)
+
+
+plot2 <- ggplot(final_Output_cleaned_sub_above_dom,aes(x=numberDismatching,y=ANI,color=species))+geom_jitter(alpha=0.05)+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+
+# coord_trans(y="log2",x="log2")+
+    scale_x_continuous(breaks=c(0,1,2,3,4,5))+
+  scale_color_manual(values = colorDataFrame_interest$color)+
+  scale_y_continuous(limit=c(97.5,100))+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  labs(y="ANI (%)",x="Number of different\naccessory immunity systems")+
+geom_smooth(method="lm",se = FALSE)
+
+plot2
+
+
+##---------------------------------------------------
+#split
+##---------------------------------------------------
+
+
+plot
+
+
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//decreasing_ANI_accessory.pdf",width=6,height=4)
+# plot2+theme(legend.position = "none")
+ # dev.off()
+
+ 
+ plot3 <- ggplot(final_Output_cleaned_sub_above_dom,aes(x=numberDismatching,y=ANI,color=species))+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+
+# coord_trans(y="log2",x="log2")+
+    scale_x_continuous(breaks=c(0,1,2,3,4,5))+
+  scale_color_manual(values = colorDataFrame_interest$color)+
+  scale_y_continuous(limit=c(97.5,100))+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  labs(y="ANI (%)",x="Number of different\naccessory immunity systems")+
+geom_smooth(method="lm",se = FALSE)+
+  stat_poly_eq(formula = my.formula,
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),label.x=9,
+               parse = TRUE,)
+
+plot3
+ # label.x=7,
+# +geom_jitter(alpha=0.05)
+ 
+     # png("~/Desktop/Projects/2020_CRISPRscope/Plots//decreasing_ANI_accessory_supp.png", width = 2100, height = 1500,res=300)
+
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//decreasing_ANI_accessory_supp.pdf",width=6,height=4)
+# plot3
+
+# dev.off()
+```
+
+# Figure 2
+
+
+
+## ANI vs. CRISPR
+
+```{r}
+library(tidyverse)
+ANI_CUSTOM_OUTPUT_21072021 <- read_csv("data_submit/ANI_CUSTOM_OUTPUT_21072021.csv") %>% filter(turnover_rate<Inf) %>% filter(perc_shared!=0)
+
+table(ANI_CUSTOM_OUTPUT_21072021$species_query)
+
+ANI_CUSTOM_OUTPUT_21072021 %>% filter(perc_shared>0.5) %>% summarise(median=median(ANI),means=mean(ANI),sds=sd(ANI))
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021,aes(x=ANI,perc_shared))+geom_point(alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~species_ref)+coord_trans(y="log10")
+
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021,aes(x=ANI,perc_shared))+geom_point(alpha=0.1,size=0.2)+theme_classic()+coord_trans(y="log10")
+
+ANI_CUSTOM_OUTPUT_21072021 %>% filter(ANI>99.5) %>% summarise(median=100*median(perc_shared),means=100*mean(perc_shared),sds=100*sd(perc_shared))
+
+ANI_CUSTOM_OUTPUT_21072021 %>% filter(ANI>99.9) %>% summarise(median=100*median(perc_shared),means=100*mean(perc_shared),sds=100*sd(perc_shared))
+
+
+ANI_CUSTOM_OUTPUT_21072021 %>% filter(ANI<99) %>% summarise(median=100*median(perc_shared),means=100*mean(perc_shared),sds=100*sd(perc_shared))
+
+
+# %>% filter(species_ref=="Lacticaseibacillus_casei") 
+##-----------------
+ANI_CUSTOM_OUTPUT_21072021$ANI_rounded <- round(ANI_CUSTOM_OUTPUT_21072021$ANI,digits = 1)
+
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021,aes(group=ANI_rounded,x=ANI_rounded,perc_shared))+geom_boxplot(alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~species_ref)+coord_trans(y="log10")+geom_point(alpha=0.1,size=0.2)
+
+
+numbercomparison_df <- ANI_CUSTOM_OUTPUT_21072021 %>% group_by(species_ref,ANI_rounded) %>% summarise(numbercomparisons_tmp=n())
+
+ggplot(numbercomparison_df,aes(numbercomparisons_tmp))+geom_bar()+theme_classic()+coord_trans(x="log10")
+
+
+cutoff_n_comparison=40
+# numbercomparison_df$numbercomparisons_tmp>
+keeps <- numbercomparison_df %>% filter(numbercomparisons_tmp>cutoff_n_comparison)
+
+ANI_CUSTOM_OUTPUT_21072021_keeps <- data.frame()
+
+for (numRows in 1:nrow(keeps)) {
+  speciessss <- keeps[numRows,"species_ref"] %>% unlist() %>% as.character()
+  ANIsss <- keeps[numRows,"ANI_rounded"]%>% unlist() %>% as.character()
+# ANI_CUSTOM_OUTPUT_21072021$species_ref==speciessss
+  # tmpss <- ANI_CUSTOM_OUTPUT_21072021 %>% filter(species_ref==speciessss)
+  tmpss <- ANI_CUSTOM_OUTPUT_21072021 %>% filter(species_ref==speciessss&ANI_rounded==ANIsss)
+
+  ANI_CUSTOM_OUTPUT_21072021_keeps <- rbind(ANI_CUSTOM_OUTPUT_21072021_keeps,tmpss)
+}
+
+
+
+plot_ANI_Percent_shared_species <- ggplot(ANI_CUSTOM_OUTPUT_21072021_keeps,aes(group=ANI_rounded,x=ANI_rounded,perc_shared))+geom_boxplot(outlier.shape = NA,alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~species_ref)+coord_trans(y="log10")#+geom_point(alpha=0.1,size=0.2)
+
+unique(ANI_CUSTOM_OUTPUT_21072021_keeps$species_ref)
+ANI_CUSTOM_OUTPUT_21072021_keeps_cleaned <- ANI_CUSTOM_OUTPUT_21072021_keeps %>% filter(species_ref %in% c("Lactiplantibacillus_plantarum","Lactobacillus_delbrueckii", "Lactobacillus_helveticus","Propionibacterium_freudenreichii","Streptococcus_thermophilus"))
+
+plot_ANI_Percent_shared_species <- ggplot(ANI_CUSTOM_OUTPUT_21072021_keeps_cleaned,aes(group=ANI_rounded,x=ANI_rounded,y=100*(perc_shared)))+geom_boxplot(outlier.shape = NA,alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~species_ref)+coord_trans(y="log10")+labs(x="ANI (%)",y="shared CRISPR (%)")
+plot_ANI_Percent_shared_species
+
+  # png("~/Desktop/Projects/2020_CRISPRscope/Plots//CRISPRshared_ANI_perSpecies.png", width = 2100, height = 1500,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+
+# plot_ANI_Percent_shared_species
+ # dev.off()
+
+##-----------------only above 99.5
+
+ANI_CUSTOM_OUTPUT_21072021_keeps_highs <- ANI_CUSTOM_OUTPUT_21072021_keeps %>% filter(ANI_rounded>99.4)
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_keeps_highs,aes(group=ANI_rounded,x=ANI_rounded,perc_shared))+geom_boxplot(outlier.shape = NA,alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~species_ref)+coord_trans(y="log10")#+geom_point(alpha=0.1,size=0.2)
+
+
+```
+
+new ANI vs. shared CRISPR for arrays
+
+```{r}
+library(tidyverse)
+
+ ANI_perArray_sharedSpacers_new <- read_csv("data_submit/ANI_perArray_sharedSpacers_newer.csv") %>% mutate(shared_spacers=100*perc_shared) %>% filter(shared_spacers!=0) %>% filter(Cas_subtype1==Cas_subtype2)
+table(ANI_perArray_sharedSpacers_new$Organism1)
+
+ggplot(ANI_perArray_sharedSpacers_new,aes(x=ANI,y=shared_spacers))+geom_point(alpha=0.2,size=0.4)+theme_classic()+coord_trans(y="log2")
+ggplot(ANI_perArray_sharedSpacers_new,aes(x=ANI,y=shared_spacers))+geom_point(alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Organism1)+coord_trans(y="log10")
+
+ggplot(ANI_perArray_sharedSpacers_new,aes(x=ANI,y=shared_spacers))+geom_point(alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Cas_subtype1)+coord_trans(y="log10")
+
+
+ggplot(ANI_perArray_sharedSpacers_new,aes(x=ANI))+geom_density()+theme_classic()
+ggplot(ANI_perArray_sharedSpacers_new,aes(x=shared_spacers))+geom_density()+theme_classic()+coord_trans(x="log10")
+
+
+ANI_perArray_sharedSpacers_new$shared_spacers
+ANI_perArray_sharedSpacers_new %>% filter(ANI>99.5) %>% summarise(median=median(shared_spacers),means=mean(shared_spacers),sds=sd(shared_spacers))
+
+##-----------------
+ANI_perArray_sharedSpacers_new$ANI_rounded <- round(ANI_perArray_sharedSpacers_new$ANI,digits = 1)
+
+
+ggplot(ANI_perArray_sharedSpacers_new,aes(group=ANI_rounded,x=ANI_rounded,shared_spacers))+geom_boxplot(alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Organism1)+coord_trans(y="log10")+geom_point(alpha=0.1,size=0.2)
+ggplot(ANI_perArray_sharedSpacers_new,aes(group=ANI_rounded,x=ANI_rounded,shared_spacers))+geom_boxplot(alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Cas_subtype1)+coord_trans(y="log10")+geom_point(alpha=0.1,size=0.2)
+
+numbercomparison_df <- ANI_perArray_sharedSpacers_new %>% group_by(Cas_subtype1,ANI_rounded) %>% summarise(numbercomparisons_tmp=n())
+
+ggplot(numbercomparison_df,aes(numbercomparisons_tmp))+geom_bar()+theme_classic()+coord_trans(x="log10")
+
+
+cutoff_n_comparison=40
+# numbercomparison_df$numbercomparisons_tmp>
+keeps <- numbercomparison_df %>% filter(numbercomparisons_tmp>cutoff_n_comparison)
+
+ANI_CUSTOM_OUTPUT_21072021_keeps <- data.frame()
+
+for (numRows in 1:nrow(keeps)) {
+  speciessss <- keeps[numRows,"Cas_subtype1"] %>% unlist() %>% as.character()
+  ANIsss <- keeps[numRows,"ANI_rounded"]%>% unlist() %>% as.character()
+# ANI_CUSTOM_OUTPUT_21072021$species_ref==speciessss
+  # tmpss <- ANI_CUSTOM_OUTPUT_21072021 %>% filter(species_ref==speciessss)
+  tmpss <- ANI_perArray_sharedSpacers_new %>% filter(Cas_subtype1==speciessss&ANI_rounded==ANIsss)
+
+  ANI_CUSTOM_OUTPUT_21072021_keeps <- rbind(ANI_CUSTOM_OUTPUT_21072021_keeps,tmpss)
+}
+
+
+
+plot_ANI_Percent_shared_species <- ggplot(ANI_CUSTOM_OUTPUT_21072021_keeps,aes(group=ANI_rounded,x=ANI_rounded,shared_spacers))+geom_boxplot(outlier.shape = NA,alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Cas_subtype1)+coord_trans(y="log10")#+geom_point(alpha=0.1,size=0.2)
+
+unique(ANI_CUSTOM_OUTPUT_21072021_keeps$species_ref)
+ANI_CUSTOM_OUTPUT_21072021_keeps_cleaned <- ANI_CUSTOM_OUTPUT_21072021_keeps %>% filter(species_ref %in% c("Lactiplantibacillus_plantarum","Lactobacillus_delbrueckii", "Lactobacillus_helveticus","Propionibacterium_freudenreichii","Streptococcus_thermophilus"))
+
+plot_ANI_Percent_shared_species <- ggplot(ANI_CUSTOM_OUTPUT_21072021_keeps,aes(group=ANI_rounded,x=ANI_rounded,y=shared_spacers))+geom_boxplot(outlier.shape = NA,alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Cas_subtype1)+coord_trans(y="log10")+labs(x="ANI (%)",y="shared CRISPR (%)")
+plot_ANI_Percent_shared_species
+plot_ANI_Percent_shared_species
+  png("~/Desktop/Projects/2020_CRISPRscope/Plots//CRISPRshared_ANI_persubtype.png", width = 2100, height = 1500,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+
+plot_ANI_Percent_shared_species
+ dev.off()
+
+##-----------------only above 99.5
+
+ANI_CUSTOM_OUTPUT_21072021_keeps_highs <- ANI_CUSTOM_OUTPUT_21072021_keeps %>% filter(ANI_rounded>99.4)
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_keeps_highs,aes(group=ANI_rounded,x=ANI_rounded,shared_spacers))+geom_boxplot(outlier.shape = NA,alpha=0.1,size=0.2)+theme_classic()+facet_wrap(~Cas_subtype1)+coord_trans(y="log10")#+geom_point(alpha=0.1,size=0.2)
+
+
+```
+
+
+
+##CRISPR turn-over rate
+
+```{r}
+ ANI_CUSTOM_OUTPUT_21072021 <- read_csv("data_submit/ANI_perArray_sharedSpacers_newer.csv") %>% mutate(shared_spacers=100*perc_shared) %>% filter(shared_spacers!=0) %>% filter(Cas_subtype1==Cas_subtype2) %>% filter(turnover_rate<Inf)
+
+table(ANI_CUSTOM_OUTPUT_21072021$Organism1)
+# ANI_CUSTOM_OUTPUT_21072021 <- read_csv("~/Desktop/Projects/2020_CRISPRscope/data/ANI_CUSTOM_OUTPUT_21072021.csv") %>% filter(turnover_rate<Inf) %>% filter(perc_shared!=0)
+
+# ANI_CUSTOM_OUTPUT_21072021$turnover_rate
+
+# ANI_CUSTOM_OUTPUT_21072021$str_typ_1_subtpye <- str_split_fixed(ANI_CUSTOM_OUTPUT_21072021$str_typ_1, fixed("_"), 3)[,3] 
+# ANI_CUSTOM_OUTPUT_21072021$str_typ_2_subtpye <- str_split_fixed(ANI_CUSTOM_OUTPUT_21072021$str_typ_2, fixed("_"), 3)[,3] 
+
+ANI_CUSTOM_OUTPUT_21072021$str_typ_1_subtpye <- ANI_CUSTOM_OUTPUT_21072021$Cas_subtype1
+ANI_CUSTOM_OUTPUT_21072021$str_typ_2_subtpye <- ANI_CUSTOM_OUTPUT_21072021$Cas_subtype2
+
+
+table(ANI_CUSTOM_OUTPUT_21072021$str_typ_1_subtpye)
+table(ANI_CUSTOM_OUTPUT_21072021$str_typ_2_subtpye)
+
+sum(ANI_CUSTOM_OUTPUT_21072021$str_typ_1_subtpye==ANI_CUSTOM_OUTPUT_21072021$str_typ_2_subtpye)
+sum(ANI_CUSTOM_OUTPUT_21072021$str_typ_1_subtpye!=ANI_CUSTOM_OUTPUT_21072021$str_typ_2_subtpye)
+ANI_CUSTOM_OUTPUT_21072021[which(ANI_CUSTOM_OUTPUT_21072021$str_typ_1_subtpye!=ANI_CUSTOM_OUTPUT_21072021$str_typ_2_subtpye),]
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned <- ANI_CUSTOM_OUTPUT_21072021 %>% filter(str_typ_1_subtpye==str_typ_2_subtpye)
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned,aes(x=turnover_rate))+geom_density()+theme_classic()+coord_trans(x="log10")#+lims(x=c(0,10000))+ coord_cartesian(clip = 'off')
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned,aes(x=turnover_rate,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")#+lims(x=c(0,10000))+ coord_cartesian(clip = 'off')
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned,aes(x=turnover_rate,y=perc_shared,fill=str_typ_1_subtpye,color=str_typ_1_subtpye))+geom_point(alpha=0.4)+theme_classic()
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned,aes(x=turnover_rate,y=ANI,fill=str_typ_1_subtpye,color=str_typ_1_subtpye))+geom_point(alpha=0.4)+theme_classic()
+
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset <- ANI_CUSTOM_OUTPUT_21072021_cleaned %>% filter(ANI>99)
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset,aes(x=turnover_rate,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")#+lims(x=c(0,10000))+ coord_cartesian(clip = 'off')
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_02 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset %>% filter(turnover_rate<10000) %>% filter(str_typ_1_subtpye!="I-B")
+
+
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_02,aes(x=turnover_rate,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+ coord_cartesian(clip = 'off')+lims(x=c(0,1000))
+
+p1 <- ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_02,aes(x=turnover_rate,fill=str_typ_1_subtpye,color=str_typ_1_subtpye))+geom_density(alpha=0.5)+theme_classic()+coord_trans(x="log10")+ coord_cartesian(clip = 'off')+lims(x=c(0,5000))
+
+ggplotly(p1)
+
+# p <-  ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_02,aes(x=turnover_rate,fill=str_typ_1_subtpye,color=str_typ_1_subtpye))+geom_density(alpha=0.5,adjust=1.5, position="fill")+theme_classic()+coord_trans(x="log10")+ coord_cartesian(clip = 'off')+lims(x=c(0,5000))
+# p
+# ggplotly(p)
+
+
+
+p1 <- ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_02,aes(x=turnover_rate,fill=str_typ_1_subtpye,color=str_typ_1_subtpye))+geom_density(alpha=0.3)+theme_classic()+coord_trans(x="log10")#+ coord_cartesian(clip = 'off')+lims(x=c(0,5000))#+facet_wrap(~str_typ_1_subtpye,scales="free_y")#+ coord_cartesian(clip = 'off')#+lims(x=c(0,10000))+
+ggplotly(p1)
+p1
+
+turnoversss <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset %>% group_by(str_typ_1_subtpye) %>% summarise(medianss=median(turnover_rate),meanss=mean(turnover_rate),sds=sd(turnover_rate))
+turnoversss
+
+##--------final figure
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_02,aes(x=turnover_rate,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(100,250, 500, 1000, 2500,5000,10000))
+
+scale_x_range(breaks=c(2.3,3.2,3.9,4.6), panel = "array size")
+
+
+#+ coord_cartesian(clip = 'off')#+lims(x=c(0,10000))+ coord_cartesian(clip = 'off')
+
+```
+
+maybe it makes more sense to use the normalized data for this. 
+therefore I use the mutation rate of 0.003 and the core genomes size observed in the ANI
+
+```{r}
+
+# core_genome_size <- ANI_CUSTOM_OUTPUT_21072021%>% mutate(core_fraction=bidirectional_fragment_mapping/total_query_fragment) %>% group_by(Cas_subtype2) %>% summarise(meanss=mean(core_fraction),sdss=sd(core_fraction))
+
+# 8.9 × 10−11 per bp per generation
+
+mutation_rate_total=0.003
+community_size=10^7
+###core-genome normalized mutation rate
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_03 <- ANI_CUSTOM_OUTPUT_21072021_cleaned %>% mutate(mutation_rate=mutation_rate_total*(bidirectional_fragment_mapping/total_query_fragment)) 
+
+
+##mean and sd turn over
+
+median(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04$turnover_rate)
+mean(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04$turnover_rate)
+sd(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04$turnover_rate)
+
+###number of Generations per novel CRISPR
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_03 %>% mutate(Generations_per_CRISPR=turnover_rate/mutation_rate) %>% mutate(PROBABILITY_per_generation_per_cell=1/Generations_per_CRISPR) 
+
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04,aes(x=PROBABILITY_per_generation_per_cell,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=10,hjust=1))
+
+###in community
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04 %>% mutate(novel_CRISPR_per_generation=community_size/Generations_per_CRISPR) 
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05,aes(x=novel_CRISPR_per_generation,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05,aes(x=novel_CRISPR_per_generation,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~Organism2,scales="free_y")+theme(legend.position = "right",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))
+
+plotx <- ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05,aes(x=novel_CRISPR_per_generation,fill=Organism2))+geom_density(alpha=0.4)+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "right",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))
+plotx
+ggplotly(plotx)
+##--------final figure
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05 %>% filter(str_typ_1_subtpye!="I-B")
+table(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05$str_typ_2_subtpye) %>% sort()
+
+turnoversss <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05 %>% group_by(str_typ_1_subtpye) %>% summarise(medianss=median(novel_CRISPR_per_generation),meanss=mean(novel_CRISPR_per_generation),sds=sd(novel_CRISPR_per_generation)) %>% arrange(.,medianss)
+turnoversss
+
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06$str_typ_1_subtpye = factor(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06$str_typ_1_subtpye, levels=c(c("I-E","I-C","II-C","I-G","II-A","III-A")))
+
+
+
+final_turnover_Rate_plot <- ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06,aes(x=novel_CRISPR_per_generation,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=8,hjust=1),axis.text.y = element_blank(),axis.ticks.y=element_blank())+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))+geom_vline(xintercept = 35,color="darkgrey", linetype="dashed")+labs(y="Density",x="Novel CRISPR spacers per generation in 10^7 cells")
+
+final_turnover_Rate_plot
+
+ # png("~/Desktop/Projects/2020_CRISPRscope/Plots//CRISPR_SPACER_TURNOVER.pdf", width = 1500, height = 1100,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//CRISPR_SPACER_TURNOVER.pdf",width=8,height=5)
+# final_turnover_Rate_plot
+ # dev.off()
+
+```
+
+
+use lenski's estimage (8.9 × 10−11 per bp per generation) and account for genome size
+
+```{r}
+ANI_CUSTOM_OUTPUT_21072021_cleaned$bidirectional_fragment_mapping/ANI_CUSTOM_OUTPUT_21072021_cleaned$total_query_fragment
+
+mutation_rate_total=8.9 * 10^-11 
+community_size=10^7
+###core-genome normalized mutation rate
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_03 <- ANI_CUSTOM_OUTPUT_21072021_cleaned %>% mutate(mutation_rate=(mutation_rate_total*(bidirectional_fragment_mapping*1000))*(bidirectional_fragment_mapping/total_query_fragment)) 
+
+##mean and sd turn over
+
+median(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04$turnover_rate)
+mean(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04$turnover_rate)
+sd(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04$turnover_rate)
+
+###number of Generations per novel CRISPR
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_03 %>% mutate(Generations_per_CRISPR=turnover_rate/mutation_rate) %>% mutate(PROBABILITY_per_generation_per_cell=1/Generations_per_CRISPR) 
+
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04,aes(x=PROBABILITY_per_generation_per_cell,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=10,hjust=1))
+
+###in community
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_04 %>% mutate(novel_CRISPR_per_generation=community_size/Generations_per_CRISPR) 
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05,aes(x=novel_CRISPR_per_generation,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))
+
+ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05,aes(x=novel_CRISPR_per_generation,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~Organism2,scales="free_y")+theme(legend.position = "right",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))
+
+plotx <- ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05,aes(x=novel_CRISPR_per_generation,fill=Organism2))+geom_density(alpha=0.4)+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "right",axis.text.x = element_text(angle = 45,size=10,hjust=1))+scale_x_continuous(breaks=c(2,10,50, 100, 250,500))
+plotx
+ggplotly(plotx)
+##--------final figure
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06 <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05 %>% filter(str_typ_1_subtpye!="I-B")
+table(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05$str_typ_2_subtpye) %>% sort()
+
+turnoversss <- ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05 %>% group_by(str_typ_1_subtpye) %>% summarise(medianss=median(novel_CRISPR_per_generation),meanss=mean(novel_CRISPR_per_generation),sds=sd(novel_CRISPR_per_generation)) %>% arrange(.,medianss)
+turnoversss
+
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_05  %>% summarise(medianss=median(novel_CRISPR_per_generation),meanss=mean(novel_CRISPR_per_generation),sds=sd(novel_CRISPR_per_generation)) 
+
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06$str_typ_1_subtpye = factor(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06$str_typ_1_subtpye, levels=c(c("I-E","I-C","II-C","I-G","II-A","III-A")))
+
+ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06$str_typ_1_subtpye = factor(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06$str_typ_1_subtpye, levels=c(c("I-E","I-C","I-G","II-C","II-A","III-A")))
+
+final_turnover_Rate_plot <- ggplot(ANI_CUSTOM_OUTPUT_21072021_cleaned_subset_06,aes(x=novel_CRISPR_per_generation,fill=str_typ_1_subtpye))+geom_density()+theme_classic()+coord_trans(x="log10")+facet_wrap(~str_typ_1_subtpye,scales="free_y")+theme(legend.position = "none",axis.text.x = element_text(angle = 45,size=8,hjust=1),axis.text.y = element_blank(),axis.ticks.y=element_blank())+scale_x_continuous(breaks=c(0.25,0.5,1,2,10,20))+geom_vline(xintercept = 2.8,color="darkgrey", linetype="dashed")+labs(y="Density",x="Novel CRISPR spacers per generation in 10^7 cells")
+
+final_turnover_Rate_plot
+
+ # png("~/Desktop/Projects/2020_CRISPRscope/Plots//CRISPR_SPACER_TURNOVER.pdf", width = 1500, height = 1100,res=300)
+#    pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//CRISPR_SPACER_TURNOVER.pdf",width=8,height=5)
+# final_turnover_Rate_plot
+#  dev.off()
+
+```
+
+# Figure 3
+
+#### Spacer and repeat abundance
+
+```{r}
+library(tidyverse)
+plot_milread_02 <- read_csv("data_submit/proj_sample_milread_count.csv")
+plot_milread_02 <- read_csv("data_submit/proj_sample_milread_count_80.csv") %>% mutate(num_mio_reads_spacer=n_spacer/spacer_per_milread)%>% select(-spacer_per_milread,-repeat_per_milread,) %>% mutate(Spacers=n_spacer_clst80/num_mio_reads_spacer,Repeats=n_repeat_clst80/num_mio_reads_spacer)%>% select(-n_spacer,-n_repeat,-n_spacer_clst80,-n_repeat_clst80,-num_mio_reads_spacer)
+
+metagenomes_sample_speciesRichness_prep <- metagenomes_sample_speciesRichness %>% select(-studyId)
+
+plot_milread_02_ext <- merge(plot_milread_02,metagenomes_sample_speciesRichness_prep,by.x="SRA_ID",by.y="sample_name",all.x=T) %>% as.tibble()
+
+
+plot_milread_02_ext$group <- plyr::revalue(plot_milread_02_ext$ProjectID,c("Cheese starter cultures"  = "thermophilic",
+"Lordan et al. 2019"    = "mesophilic",
+"Pasolli et al. 2020"         = "thermophilic",
+"Swiss raclette"        = "mesophilic",
+"Walsh et al. 2020"     = "mesophilic"))
+
+
+plot_milread_0_long <- gather(plot_milread_02_ext, type, per_mil, c("Spacers","Repeats"), factor_key=TRUE,na.rm = TRUE) %>% select(-ProjectID)
+
+
+
+##------------
+##stats
+##------------
+ plot_milread_0_long %>% group_by(type) %>% summarise(means=mean(per_mil),sdss=sd(per_mil))
+
+
+###------------------------
+#include münch et al. 
+###------------------------
+
+CRISPR_abundance_munch_et_al <- read_delim("data_submit/CRISPR_abundance_munch_et_al.csv", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
+
+CRISPR_abundance_munch_et_al_long <- gather(CRISPR_abundance_munch_et_al, type, per_mil, c("Spacers","Repeats"), factor_key=TRUE,na.rm = TRUE) %>% select("SRA_ID" , "group" , "species_richness", "type", "per_mil"  )
+
+plot_milread_0_long_complet <- rbind(plot_milread_0_long,CRISPR_abundance_munch_et_al_long) %>% mutate(grouping="normalized by\nsequecing depth")
+
+plot_milread_0_long_complet$group = factor(plot_milread_0_long_complet$group, levels=rev(c("mesophilic","thermophilic","münch et al, 2021")))
+
+
+###------------------------
+#new include münch et al. 
+###------------------------
+
+CRISPR_abundance_munch_et_al_species <- read_csv("data_submit/CRISPR data - Figure 2 - Panel C (x).csv")
+CRISPR_abundance_munch_et_al_spacers <- read_csv("data_submit/CRISPR data - Figure 2 - Panel C (y) extended.csv")
+colnames(plot_milread_0_long)
+CRISPR_abundance_munch_et_al_long <- merge(CRISPR_abundance_munch_et_al_spacers,CRISPR_abundance_munch_et_al_species,by.x="sample",by.y="Species") %>% as_tibble() %>% mutate(group="münch et al, 2021")%>% mutate(type="Spacers") %>% select(sample,`Number (> 1%RA)`,group,type,spacers_80) 
+
+colnames(CRISPR_abundance_munch_et_al_long) <- c("SRA_ID","species_richness","group","type"  , "per_mil" )
+
+# CRISPR_abundance_munch_et_al_long <- gather(CRISPR_abundance_munch_et_al, type, per_mil, c("Spacers","Repeats"), factor_key=TRUE,na.rm = TRUE) %>% select("SRA_ID" , "group" , "species_richness", "type", "per_mil"  )
+
+plot_milread_0_long_complet_01 <- rbind(plot_milread_0_long,CRISPR_abundance_munch_et_al_long) %>% mutate(grouping="normalized by\nsequecing depth")
+
+plot_milread_0_long_complet_02 <- rbind(plot_milread_0_long,CRISPR_abundance_munch_et_al_long) %>% mutate(grouping="normalized by\nrichness") %>% mutate(per_mil=per_mil/species_richness) %>% filter(!is.na(per_mil))
+plot_milread_0_long_complet <- rbind(plot_milread_0_long_complet_01,plot_milread_0_long_complet_02) %>% filter(type!="Repeats")  %>% as_tibble()
+
+plot_milread_0_long_complet$group = factor(plot_milread_0_long_complet$group, levels=rev(c("mesophilic","thermophilic","münch et al, 2021")))
+
+plot_milread_0_long_complet$grouping = factor(plot_milread_0_long_complet$grouping, levels=(c("normalized by\nsequecing depth","normalized by\nrichness")))
+
+# colorssss <- rev(c("blue","red","grey77"))
+
+# colorssss <- rev(c("#B1DDF1","#9F87AF","grey77"))
+colorssss <- rev(c("#6DAEDB","#FFB4A2","grey77"))
+# colorssss <- rev(c("#A9B3CE","#9E788F","grey77"))
+# colorssss <- rev(c("#465775","#EF6F6C","grey77"))
+
+
+###------------------------
+#plot_normalised per million
+###------------------------
+
+# plot_perMio <- ggplot(plot_milread_0_long_complet,aes(x=group,y=per_mil,fill=group,color=group))+geom_violin(alpha=0.6,adjust=0.8)+theme_classic()+labs(x="",y="Observed number per million")+ggforce::geom_sina(alpha=0.8)+ coord_flip()+theme(legend.position = "none")+facet_grid(grouping~type,scales = "free")+geom_boxplot(color="grey44",alpha=0,width=.25)+scale_fill_manual(values =colorssss )+scale_color_manual(values =colorssss )
+# plot_perMio
+
+###------------------------
+#add richness
+###------------------------
+
+# plot_milread_0_long_RICHNESS <- plot_milread_0_long_complet %>% filter(!is.na(species_richness))%>% mutate(per_mil=per_mil/species_richness) %>% mutate(grouping="normalized by\nRichness")
+
+plot_milread_0_long_complet_1 <- plot_milread_0_long_complet %>% filter(grouping=="normalized by\nsequecing depth")
+
+plot_richness_01 <- ggplot(plot_milread_0_long_complet_1,aes(x=group,y=per_mil,fill=group,color=group))+geom_violin(alpha=0.6,adjust=0.8)+theme_classic()+labs(x="",y="Normalised number per million")+ggforce::geom_sina(alpha=0.8)+ coord_flip()+theme(legend.position = "none")+facet_grid(grouping~.,scales = "free_x")+geom_boxplot(color="grey44",alpha=0,width=.25)+scale_fill_manual(values =colorssss )+scale_color_manual(values =colorssss )
+plot_richness_01
+
+plot_milread_0_long_complet_2 <- plot_milread_0_long_complet %>% filter(grouping!="normalized by\nsequecing depth")
+
+
+plot_richness_02 <- ggplot(plot_milread_0_long_complet_2,aes(x=group,y=per_mil,fill=group,color=group))+geom_violin(alpha=0.6,adjust=0.8)+theme_classic()+labs(x="",y="Normalised number per million")+ggforce::geom_sina(alpha=0.8)+ coord_flip()+theme(legend.position = "none")+facet_grid(grouping~.,scales = "free_x")+geom_boxplot(color="grey44",alpha=0,width=.25)+scale_fill_manual(values =colorssss )+scale_color_manual(values =colorssss )
+plot_richness_02
+
+###------------------------
+#merge plots
+###------------------------
+
+# plot_perMio+plot_richness+  plot_layout(heights = c(1, 1))
+ # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/counts_spacer_repeat_samples_02.pdf",width=4.5,height=5)
+plot_richness_01+plot_richness_02+  plot_layout(heights = c(1, 1))
+
+# dev.off()
+##--------------
+#significance
+##--------------
+
+ stat.test<- plot_milread_0_long_complet %>%
+  group_by(grouping,type) %>%
+  t_test(per_mil ~ group)  %>%adjust_pvalue(method = "bonferroni") %>%
+  add_significance()
+stat.test 
+
+
+for (groupingzzz in as.character(unique(plot_milread_0_long_complet$grouping))) {
+  
+  for (groupss1 in  as.character(unique(plot_milread_0_long_complet$group))) {
+    
+          tmp <- plot_milread_0_long_complet %>% filter(grouping==groupingzzz) %>% filter(group != groupss1)
+
+    
+          groupzz1 <- unique(tmp$group)[1]
+          groupzz2 <- unique(tmp$group)[2]
+          
+          
+          tmp$group <- droplevels(tmp$group)
+    # for (groupss2 in  as.character(unique(plot_milread_0_long_complet$group))) {
+    
+                # tmp1 <- tmp %>% filter(grouping==groupingzzz) %>% filter(group != groupss2)
+
+      # unique(tmp$group)
+      
+      tmp3 <- wilcox.test(per_mil~group, data=tmp, paired=FALSE)
+      # tmp3$p.value
+       tmp4 <- data.frame(grouping=groupingzzz,group1=groupzz1,group2=groupzz2,pvalue=tmp3$p.value)
+      
+       wilcoxen_grouping <- rbind(wilcoxen_grouping, tmp4)
+       
+
+  }
+  
+
+}
+
+```
+
+
+
+
+## rarefaction spacer
+
+Here, I look if the metagenomic spacers are presence. 
+
+```{r}
+
+cluster_by_sample_spread_01 <- read_csv("data_submit/cluster_by_sample_spread_01.csv") #,   col_types = cols(`1944` = col_character())
+# str(cluster_by_sample_spread_01)
+
+cluster_by_sample_spread_01 %>% mutate()
+
+# colSums(cluster_by_sample_spread_01$`1944`)
+# sum(ifelse(cluster_by_sample_spread_01$`1944`)
+
+ifelse(cluster_by_sample_spread_01$`1944`)
+
+cluster_by_sample_spread_01$`1944` <- as.numeric(ifelse(cluster_by_sample_spread_01$`1944`=="0","0","1"))
+
+
+for (variabless in 2:ncol(cluster_by_sample_spread_01)) {
+  
+cluster_by_sample_spread_01[,variabless] <- as.numeric(ifelse(cluster_by_sample_spread_01[,variabless]=="0","0","1"))
+
+}
+
+colSums(cluster_by_sample_spread_01[,-1]) %>% hist()
+colnames(cluster_by_sample_spread_01)
+cluster_by_sample_spread_preped <- cluster_by_sample_spread_01 %>% remove_rownames() %>% column_to_rownames(., var = "cluster_spacer_identity") %>% t()
+
+#%>% mutate(cluster_spacer_identity=paste0("cluster",cluster_spacer_identity))
+
+# cluster_by_sample_spread_preped <- cluster_by_sample_spread_01 %>% remove_rownames()%>% column_to_rownames(., var = "cluster_spacer_identity")
+
+colSums(cluster_by_sample_spread_preped) %>% hist()
+
+cluster_by_sample_spread_preped <- cluster_by_sample_spread_preped[which(!is.na(rowSums(cluster_by_sample_spread_preped))),]
+cluster_by_sample_spread_spacer <- cluster_by_sample_spread_preped
+
+dim(cluster_by_sample_spread_spacer)
+###------------------------------------
+# rarefaction plot
+##-----------------------------
+
+# gene_presence_absence_roary_preped <- gene_presence_absence_roary[,-c(2:14)] %>% remove_rownames()%>% column_to_rownames(., var = "Gene")
+# hist(colSums(cluster_by_sample_spread_preped),xlim = c(0,10),breaks = 1:100)
+
+rar.tbl <- rarefaction(cluster_by_sample_spread_preped, n.perm = 200)
+# data_genome_all <- rar.tbl %>%   gather(key = "Permutation", value = "Clusters", -Genome)  #%>% filter(!is.na(Clusters))
+data_genome_all <- rar.tbl %>%   gather(key = "Permutation", value = "Clusters", -Genome) %>% add_column(type="spacers")
+data_genome_spacers <- data_genome_all
+
+# rarefy_test <- rarefy(cluster_by_sample_spread_preped,sample=200)
+
+# rarefy_test <- rarefy(cluster_by_sample_spread_preped,min(rowSums(cluster_by_sample_spread_preped)))
+
+max(data_genome_all$Clusters)
+
+Rarefaction_all <- ggplot(data_genome_all,aes(x = Genome, y = Clusters))+
+     geom_smooth(method="nls",formula=y~s*x/(F+x),method.args=list(start = c( F = 10,s=1000 )), se=FALSE)+theme_classic()+
+    labs(x="Metagenomic samples",y="CRISPR spacers")
+Rarefaction_all
+
+   pdf("~/Desktop/Projects/2020_CRISPRscope/Plots/rarefactions_spacers.pdf",width=3.5,height=3.5)
+
+Rarefaction_all
+
+dev.off()
+
+
+#------------------------------------PCOA
+
+## Principal coordinate analysis and simple ordination plot
+mite.D <- vegdist(cluster_by_sample_spread_preped, "bray")
+res <- pcoa(mite.D)
+res$values
+biplot(res)
+
+## Project unstandardized and standardized species on the PCoA ordination plot
+mite.log.st = apply(mite.D, 2, scale, center=TRUE, scale=TRUE)
+
+par(mfrow=c(1,2))
+biplot(res, mite.log)
+biplot(res, mite.log.st)
+
+
+par(mfrow=c(1,1))
+
+##test
+
+df_pca <- prcomp(cluster_by_sample_spread_preped)
+
+plot(df_pca$x[,1], df_pca$x[,2])
+
+
+
+
+
+df_pca <- prcomp(defense_systems_complete_wide_preped)
+
+plot(df_pca$x[,1], df_pca$x[,2])
+
+  
+
+
+metabolo.sum <- summary(df_pca)
+metabolo.sum
+metabolo.sum <- metabolo.sum$importance %>% as.data.frame()
+
+ploting_data <- df_pca$x %>% as.data.frame()
+ploting_data$genome <- rownames(ploting_data)
+ploting_data_final <-  merge(ploting_data,defense_systems_species,by="genome")
+
+table(ploting_data_final$species)
+
+pca0 <- ggbiplot(df_pca,var.axes=FALSE,obs.scale = 1)+theme_classic()+labs(title="grouping by biological replicates")+theme(legend.position = "none")
+pca0
+
+pca1 <- ggbiplot(df_pca,var.axes=FALSE,groups=ploting_data_final$species,obs.scale = 1,alpha=0.3,ellipse=TRUE)+theme_classic()+theme(legend.position = "right")
+pca1
+
+species_colors <- read_delim("data_submit/species_colors.txt", "\t", escape_double = FALSE, trim_ws = TRUE)
+
+```
+
+
+# Figure 4
+
+## Protspacer vs. spacers
+
+
+
+```{r}
+##-----------------------------------------------
+##------------------------import data
+##-----------------------------------------------
+
+DR_SP_DR_info <- read_csv("data_submit/DR_SP_DR_info.csv", col_types = cols(sample = col_character())) %>% filter(sample %in% unique(X20210424_metaphlan$sample_name))  #%>%  select(-readNumber,-cluster_repeat_80,-cluster_spacer_identity,-cluster_repeat_identity,-cluster_repeat_identity,-cluster_spacer_80)
+table(DR_SP_DR_info$grouping)
+ 
+
+
+DR_SP_DR_info %>% nrow()
+DR_SP_DR_info %>% filter(spacer_cov<3) %>% nrow()
+DR_SP_DR_info %>% filter(protospacer_cov<3) %>% nrow()
+DR_SP_DR_info %>% filter(spacer_cov>3) %>% filter(protospacer_cov>3)%>% nrow()  
+
+
+ 100*((DR_SP_DR_info$cluster_spacer_80 %>% unique() %>% length())/ 8226 )
+ 
+ 
+ table(DR_SP_DR_info$sample)
+  
+  DR_SP_DR_info$grouping <- ifelse(DR_SP_DR_info$spacer_cov<3,"kein spacer",ifelse(DR_SP_DR_info$protospacer_cov>3,"mit proto","ohne proto"))
+
+  
+  DR_SP_DR_info %>% filter(grouping=="mit proto") %>% select(sample,cluster_spacer_80) %>% unique() %>% group_by(sample) %>% summarise(countss=n())
+    DR_SP_DR_info %>% filter(grouping=="ohne proto") %>% select(sample,cluster_spacer_80) %>% unique() %>% group_by(sample) %>% summarise(countss=n())
+
+  
+ DR_SP_DR_info %>% filter(spacer_cov>3) %>% nrow()
+ 
+ 
+  
+
+CRISPR_spacer_coverage_filtered <- DR_SP_DR_info %>% filter(spacer_cov>3) %>% filter(protospacer_cov>3) %>%  select(-readNumber,-cluster_repeat_80,-cluster_spacer_identity,-cluster_repeat_identity,-cluster_repeat_identity,-cluster_spacer_80)
+
+CRISPR_spacer_coverage_filtered <- CRISPR_spacer_coverage %>% filter(spacer_cov>3) %>% filter(protospacer_cov>3)
+
+
+# CRISPR_spacer_coverage_filtered,DR_SP_DR_info,by.x="spacer_name",by.y=""
+
+my.formula <- y ~ x
+
+plot <- ggplot(CRISPR_spacer_coverage_filtered,aes(x=spacer_CPM,y=protospacer_CPM))+geom_point(alpha=0.2)+theme_classic()+
+# coord_trans(y="log2",x="log2")+
+    scale_x_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  scale_y_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  labs(x="Spacer (cpm)",y="Protospacers  (cpm)")+
+geom_smooth(method="lm",se = FALSE,color="blue",linetype = "dashed")+
+  stat_poly_eq(formula = my.formula,
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+               parse = TRUE,)
+
+# + geom_abline(intercept = 1060, slope = 0.508,color="red")
+plot
+
+#-------------------important subtypes
+###suptypes 
+
+CRISPR_spacer_coverage_filtered_subs <- CRISPR_spacer_coverage_filtered %>% filter(Subtype %in% c("I-E","I-C","II-C","I-G","II-A","III-A"))
+
+  
+plot2 <- ggplot(CRISPR_spacer_coverage_filtered_subs,aes(x=spacer_CPM,y=protospacer_CPM,color=Subtype))+geom_point(alpha=0.2)+theme_classic()+
+# coord_trans(y="log2",x="log2")+
+    scale_x_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  scale_y_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  labs(x="Spacer (cpm)",y="Protospacers  (cpm)")+
+geom_smooth(method="lm",se = FALSE)
+
+plot2
+
+plot+plot2
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//protospacer_vs_spacer.pdf",width=9,height=4)
+# plot+plot2
+ # dev.off()
+
+ ##------------------
+ #de-seq plot
+ ##------------------
+ 
+ CRISPR_spacer_coverage_filtered_de_seq <- CRISPR_spacer_coverage_filtered %>% mutate(deseq_count= protospacer_CPM/spacer_CPM)
+ 
+ CRISPR_spacer_coverage_filtered_de_seq %>% summarise(means=mean(deseq_count),medians=median(deseq_count))
+ 
+ 
+ plot3 <- ggplot(CRISPR_spacer_coverage_filtered_de_seq,aes(x=spacer_CPM,y=deseq_count))+geom_point(alpha=0.2)+theme_classic()+
+# coord_trans(y="log2",x="log2")+
+    scale_x_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  scale_y_log10()+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  labs(x="Spacer (cpm)",y="Protospacers vs. spacer  (cpm)")+
+geom_smooth(method="lm",se = FALSE,color="blue",linetype = "dashed")#+
+  # stat_poly_eq(formula = my.formula,
+  #              aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+  #              parse = TRUE,)
+
+# + geom_abline(intercept = 1060, slope = 0.508,color="red")
+plot3
+
+ # png("~/Desktop/Projects/2020_CRISPRscope/Plots/viral_microbe_ratio.png", width = 1200, height = 1200,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+# plot3
+ # dev.off()
+ 
+#-------------------important subtypes
+###suptypes 
+
+CRISPR_spacer_coverage_filtered_de_seq_subs <- CRISPR_spacer_coverage_filtered_de_seq %>% filter(Subtype %in% c("I-E","I-C","II-C","I-G","II-A","III-A"))
+
+  
+plot4 <- ggplot(CRISPR_spacer_coverage_filtered_de_seq_subs,aes(x=spacer_CPM,y=deseq_count,color=Subtype))+geom_point(alpha=0.2)+theme_classic()+
+# coord_trans(y="log2",x="log2")+
+    scale_x_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  scale_y_log10()+
+  # lims(x=c(0,100000),y=c(0,100000))+
+  labs(x="Spacer (cpm)",y="Protospacers  (cpm)")+
+geom_smooth(method="lm",se = FALSE)
+
+plot4
+
+plot3+plot4
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//protospacer_vs_spacer_02.pdf",width=9,height=4)
+# plot3+plot4
+ # dev.off()
+ 
+ 
+ 
+ ###-------------------------------
+ #abundacne of protospacer only
+ 
+ CRISPR_spacer_coverage %>% filter(spacer_cov>3 | protospacer_cov>3) %>% nrow()
+ 
+ CRISPR_spacer_coverage_filtered_proto <- CRISPR_spacer_coverage %>% filter(spacer_cov<3) %>% filter(protospacer_cov>3) %>% add_column(groupingss="protoONLY")
+ CRISPR_spacer_coverage_filtered_both <- CRISPR_spacer_coverage %>% filter(spacer_cov>3) %>% filter(protospacer_cov>3) %>% add_column(groupingss="both")
+
+ combined <- rbind(CRISPR_spacer_coverage_filtered_proto,CRISPR_spacer_coverage_filtered_both)
+ 
+ median(CRISPR_spacer_coverage_filtered_proto$protospacer_CPM)
+ mean(CRISPR_spacer_coverage_filtered_proto$protospacer_CPM)
+ 
+ plot5 <- ggplot(combined,aes(x=groupingss,y=protospacer_CPM))+geom_boxplot()+theme_classic()+
+# coord_trans(y="log2",x="log2")+
+    #scale_x_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  scale_y_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))+
+  # lims(x=c(0,100000),y=c(0,100000))+
+   # coord_trans(y="log10")+
+  labs(y="Protospacers  (cpm)")
+# geom_smooth(method="lm",se = FALSE,color="blue",linetype = "dashed")+
+  # stat_poly_eq(formula = my.formula,
+               # aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+               # parse = TRUE,)
+
+# + geom_abline(intercept = 1060, slope = 0.508,color="red")
+plot5
+
+ ggplotly(plot5)
+ 
+ ##--------------------------------------
+ #abundance of spacers within sampels
+ 
+ 
+CRISPR_spacer_coverage_filtered <-  CRISPR_spacer_coverage %>% as_tibble() %>% filter(spacer_CPM>0 || protospacer_CPM>0) %>% filter(sample %in% unique(X20210424_metaphlan$sample_name))
+
+ 
+ coiunts_sp_dr_sp_sum <- CRISPR_spacer_coverage %>% filter(sample %in% unique(X20210424_metaphlan$sample_name))%>% group_by(sample) %>% summarise(counts=n()) 
+
+range(coiunts_sp_dr_sp_sum$counts)
+median(coiunts_sp_dr_sp_sum$counts)
+mean(coiunts_sp_dr_sp_sum$counts)
+sd(coiunts_sp_dr_sp_sum$counts)
+
+CRISPR_spacer_coverage$sample %>% unique()
+coiunts_sp_dr_sp_sum %>% filter(counts < 2)
+
+unique(X20210424_metaphlan$sample_name)
+
+
+
+ggplot(CRISPR_spacer_coverage_filtered,aes(fill=sample,x=sample,y=spacer_CPM))+geom_boxplot()+geom_jitter()+theme_classic()+theme(legend.position = "none")+scale_y_log10(limit=c(1e+01,1e+05),breaks=c(1e+01,1e+03,1e+05))
+
+
+###-normalise
+
+CRISPR_spacer_coverage_filtered_max <- CRISPR_spacer_coverage_filtered %>% group_by(sample) %>% summarise(normcount=max(spacer_CPM)) %>% left_join(.,CRISPR_spacer_coverage_filtered,) %>% mutate(norm_spacers=(spacer_CPM)/normcount) %>% filter(spacer_CPM>0) 
+
+
+spacer_abundance_plot <- ggplot(CRISPR_spacer_coverage_filtered_max,aes(fill=sample,x=sample,y=norm_spacers))+geom_boxplot()+theme_classic()+theme(legend.position = "none",axis.text.x = element_blank())+labs(y="normalized spacer abundance",x="samples")
+spacer_abundance_plot
+  # png("~/Desktop/Projects/2020_CRISPRscope/Plots/spacer_abundance_plot.png", width = 1800, height = 1200,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+# spacer_abundance_plot
+ # dev.off()
+# +geom_jitter(alpha=0.1
+ 
+# library(hrbrthemes)
+ 
+
+spacer_abundance_plot_ridge <- ggplot(CRISPR_spacer_coverage_filtered_max,aes(y=sample,x=norm_spacers,fill=..x..))+geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01)  +scale_fill_viridis() +theme_classic()+theme(legend.position = "none",axis.text.y = element_blank())+labs(x="normalized spacer abundance",y="Metagenomes",title = "Metagenomes contain between 41 and 1961 spacers")
+spacer_abundance_plot_ridge
+
+ ##---------------------------subset for only spacers from genomes
+DR_SP_DR_info <- read_csv("data_submit/DR_SP_DR_info.csv", col_types = cols(sample = col_character())) %>% filter(sample %in% unique(X20210424_metaphlan$sample_name))  #%>%  select(-readNumber,-cluster_repeat_80,-cluster_spacer_identity,-cluster_repeat_identity,-cluster_repeat_identity,-cluster_spacer_80)
+
+DR_SP_DR_info[is.na(DR_SP_DR_info$cluster_spacer_identity),]
+ 
+ DR_SP_DR_info_spacer_origin <-  DR_SP_DR_info %>% select(spacer_name,cluster_spacer_identity) %>% unique()
+
+ CRISPRscope_meta <- read_csv("data_submit/20210125_CRISPRscope_meta.csv",col_types = cols(SRA_ID = col_character())) %>% mutate(spacer_name=paste(ProjectID,SRA_ID,GID,SPID,Coverage,sep="_")) %>% select(spacer_name,cluster_spacer,identity_spacer_cluster)
+ 
+sum(is.na(CRISPRscope_meta$identity_spacer_cluster))
+ sum(is.na(CRISPRscope_meta$cluster_spacer))
+
+ CRISPR_spacer_coverage_filtered_max_extended <- CRISPR_spacer_coverage_filtered_max %>% left_join(.,DR_SP_DR_info_spacer_origin)
+# sum(is.na(CRISPR_spacer_coverage_filtered_max_extended$cluster_spacer_identity))
+ OrganismStrainClustersp <- read_csv("data_submit/OrganismStrainClustersp.csv")
+
+ CRISPR_spacer_coverage_filtered_max_extended_strains <- CRISPR_spacer_coverage_filtered_max_extended %>% filter(cluster_spacer_identity %in% unique(OrganismStrainClustersp$cluster_spacer_identity))
+ 
+ spacer_abundance_plot_ridge <- ggplot(CRISPR_spacer_coverage_filtered_max_extended_strains,aes(y=sample,x=norm_spacers,fill=..x..))+geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01)  +scale_fill_viridis() +theme_classic()+theme(legend.position = "none",axis.text.y = element_blank())+labs(x="normalized spacer abundance",y="Metagenomes",title = "Metagenomes contain between 41 and 1961 spacers")
+spacer_abundance_plot_ridge
+meta_sp_protosp_coverage_hits <- read.csv("data_submit/meta_sp_protosp_coverage_hits.csv")  %>% filter(spacer_CPM > 0 | protospacer_CPM > 0 )
+
+meta_sp_protosp_coverage_hits %>%  select(spacer_name,cluster_spacer_identity) %>% unique()%>% filter(!is.na(cluster_spacer_identity))
+
+ 
+ ##---------------------------spacer shared amongst metaG
+ 
+ CRISPR_spacer_coverage_filtered_counts <- CRISPR_spacer_coverage_filtered %>% filter(spacer_CPM>0) %>% group_by(spacer_name) %>% summarise(Number_of_samples=n())
+ table(CRISPR_spacer_coverage_filtered_counts$Number_of_samples)
+ 
+ length(CRISPR_spacer_coverage_filtered_counts$Number_of_samples) 
+
+(6293+397)/7313
+
+ 
+ spacer_shared_metaG <- ggplot(CRISPR_spacer_coverage_filtered_counts,aes(x=Number_of_samples))+geom_bar()+theme_classic()+labs(y="Spacers",x="Number of metagenomes shared")
+spacer_shared_metaG
+ 
+```
+
+# Figure 5
+
+
+# Blast spacers
+
+Here, I blast the spacers against
+
+do blasting against:
+
+1. my viral DB
+2. IMG viral DB
+3. REFSEQ db
+4. protein DB
+
+```{bash}
+
+mappingFile=/data/projects/p539_crisprscope/CRISPRblast/cluster1_spacers_reference_CRISPRscope.fasta
+BaseLocation=/data/projects/p539_crisprscope/CRISPRblast/
+mkdir -p ${BaseLocation}/blast_02
+
+  blastn -num_threads 8 -max_hsps 1 -max_target_seqs 1 -task megablast -show_gis \
+  -query ${mappingFile} \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle slen sgi sacc sblastnames staxids sscinames" \
+  -db /archiv/Phage_DB/BLAST/20190519/Vcontact/Database/alltogether/data/merged_all_phages \
+  -out ${BaseLocation}/blast_02/CRISPRblast_ViralDB.txt \
+  -evalue 0.01 -word_size 16
+  
+
+##--------------------------blast to old viral DB
+#this is the RefSeq database
+
+  blastn -num_threads 35 -max_hsps 1 -max_target_seqs 1 -task megablast -show_gis \
+  -query ${mappingFile} \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle slen sgi sacc sblastnames staxids sscinames" \
+  -db /archiv/BLAST/blast_db/20190204/viral_nucleotide/viral \
+  -out ${BaseLocation}/blast_02/CRISPRblast_ViralDB_old.txt \
+  -evalue 0.01 -word_size 16
+  
+  
+##--------------------------blast unmapped to nucleotide DB
+
+
+blastn -num_threads 37 -max_hsps 1 -max_target_seqs 1 -task megablast -show_gis \
+  -query ${mappingFile} \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle slen" \
+  -db /archiv/BLAST/blast_db/20190204/nucleotide/prokaryotes \
+  -out  ${BaseLocation}/blast_02/CRISPRblast_nucleotideDB.txt \
+  -evalue 0.01 -word_size 16
+
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB.txt 
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB_old.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_nucleotideDB.txt
+
+##--------------------------img/vr
+cd /home/vincent/anaconda3/envs/PROKKA/db/hmm
+#makeblastdb -dbtype nucl -in IMGVR_all_nucleotides.fna
+
+blastn -num_threads 37 -max_hsps 1 -max_target_seqs 1 -task megablast -show_gis \
+  -query ${mappingFile} \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle slen" \
+  -db /work/Databases/20210128_img_vr/IMGVR_all_nucleotides.fna \
+  -out  ${BaseLocation}/blast_02/CRISPRblast_IMGVR.txt \
+  -evalue 0.01 -word_size 16
+
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB.txt 
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB_old.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_nucleotideDB.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_IMGVR.txt
+
+##--------------------------nt
+#cd /home/vincent/anaconda3/envs/PROKKA/db/hmm
+#makeblastdb -dbtype nucl -in IMGVR_all_nucleotides.fna
+conda activate blast
+
+blastn -num_threads 37 -max_hsps 1 -max_target_seqs 1 -task megablast -show_gis \
+  -query ${mappingFile} \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle slen staxid ssciname sskingdom staxids" \
+  -db /work/Databases/20210708_nt/nt \
+  -out  ${BaseLocation}/blast_02/CRISPRblast_nt.txt \
+  -evalue 0.01 -word_size 16
+
+
+
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB.txt 
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB_old.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_nucleotideDB.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_IMGVR.txt
+
+```
+
+```{r}
+
+CRISPRblast_ViralDB <- read_delim("data_submit/CRISPRblast_ViralDB.txt", "\t", escape_double = FALSE, col_names = FALSE, trim_ws = TRUE, col_types = cols(X1 = col_character())) %>% select(c(X1,X13)) %>% rename(., "spacer"="X1")%>% rename(., "ViralDB"="X13")
+
+CRISPRblast_ViralDB_old <- read_delim("data_submit/CRISPRblast_ViralDB_old.txt", "\t", escape_double = FALSE, col_names = FALSE, trim_ws = TRUE, col_types = cols(X1 = col_character())) %>% select(c(X1,X13)) %>% rename(., "spacer"="X1")%>% rename(., "ViralDB_old"="X13")
+
+CRISPRblast_nucleotideDB <- read_delim("data_submit/CRISPRblast_nucleotideDB.txt", "\t", escape_double = FALSE, col_names = FALSE, trim_ws = TRUE, col_types = cols(X1 = col_character()))%>% select(c(X1,X13)) %>% rename(., "spacer"="X1")%>% rename(., "nucleotideDB"="X13")
+
+CRISPRblast_IMGVR <- read_delim("data_submit/CRISPRblast_IMGVR.txt", "\t", escape_double = FALSE, col_names = FALSE, trim_ws = TRUE, col_types = cols(X1 = col_character()))%>% select(c(X1,X13)) %>% rename(., "spacer"="X1")%>% rename(., "IMGVR"="X13")
+
+
+cluster_reference_CRISPRscope <- read_csv("data_submit/cluster_reference_CRISPRscope.txt",  col_names = FALSE, col_types = cols(X1 = col_character()))%>% rename(., "spacer"="X1")
+
+# multiFull <- merge(  cluster_reference_CRISPRscope,  CRISPRblast_ViralDB_old, all = TRUE),by="spacer",  CRISPRblast_nucleotideDB, all = TRUE),by="spacer",  CRISPRblast_ViralDB, all = TRUE),by="spacer",
+  # CRISPRblast_IMGVR, all = TRUE)
+i=1
+i=10
+for (i in 1:nrow(multiFull)) {
+  ifelse(!is.na(multiFull[,"CRISPRblast_ViralDB_old"])|!is.na(multiFull["CRISPRblast_ViralDB",i])|!is.na(multiFull["CRISPRblast_IMGVR",i])
+
+}
+multiFull[1,"ViralDB_old"]
+
+ multiFull$final <-  ifelse(!is.na(multiFull[,"ViralDB_old"])|!is.na(multiFull[,"ViralDB"])|!is.na(multiFull[,"IMGVR"]),"phage",ifelse(!is.na(multiFull[,"nucleotideDB"]),"bacteria","No-hit"))
+  table(multiFull$final)
+  
+  
+  # write.csv(multiFull,file="~/Desktop/Projects/2020_CRISPRscope/05_BCGtree/CRISPRblast/blast//final_spacerHits.txt")
+
+```
+
+## Identify CRISPR in blast
+
+Here, we want to see if any of the BLAST hits are actually still CRISPRs
+
+```{bash}
+
+awk -F "," '{if ($7=="Bacterial")print $2}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv |head
+
+awk -F "," '{if ($7=="Bacterial")print $2}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv |cut -d '|' -f 2 |head
+
+
+
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv
+
+grep "nt,Bacterial" -c /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv 
+grep "nt,Viral" -c /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv 
+
+grep "nt,Bacterial"  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv |cut -d ',' -f 2 |head
+
+awk -F "," '{if ($7=="Bacterial")print $2}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv |wc -l
+awk -F "," '{if ($7=="Bacterial")print $2}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv |cut -d '|' -f 2|sort|uniq|wc -l
+
+###------------------save entrez gi numbers for batch search
+
+grep "nt,Bacterial"  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories.csv |cut -d ',' -f 2  |cut -d '|' -f  2 |sort |uniq > /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories_gi_num.csv
+
+###------------------NEW FILE: save entrez gi numbers for batch search
+
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv
+
+awk -F "," '{if($2=="Bacterial")print $3}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv |cut -d '|' -f 2 |wc -l 
+
+awk -F "," '{if($2=="Bacterial")print $3}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv |cut -d '|' -f 2 |sort|uniq |wc -l 
+
+awk -F "," '{if($2=="Bacterial")print $3}' /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv |cut -d '|' -f 2 |sort|uniq > /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories_gi_num.csv
+
+#grep "1567597754" /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories_gi_num.csv
+#grep "sseqid" /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories_gi_num.csv
+
+####----------------------summary from all gi results
+
+#/home/vincent/Desktop/Projects/2020_CRISPRscope/data/nuccore_result.txt
+rm /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+for idsss in $(cat /home/vincent/Desktop/Projects/2020_CRISPRscope/data/Blast_nt_results_categories_gi_num.csv)
+do
+
+match=$(grep "GI:${idsss}$" -B 2 /home/vincent/Desktop/Projects/2020_CRISPRscope/data/nuccore_result.txt |head -1)
+echo -e ${idsss}"\t"${match} >> /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+done
+
+###---------summary
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "plasmid" -i -c /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "crispr" -i -c  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "phage" -i -c  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "virus" -i -c  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "homo" -i -c  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "mus" -i -c  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+grep "zebra" -i -c  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt
+
+
+grep "plasmid" -i -v /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt|grep "crispr" -v -i|grep "phage" -i -v|grep "virus" -i -v |wc -l
+
+
+grep "plasmid" -i -v /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt|grep "crispr" -v -i|grep "phage" -i -v|grep "virus" -i -v  |cut -f 1 > /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names_genomes.txt
+
+
+##-----------------------identify how many CRISPR (originally bacterial targeting) spacers are from CRISPR or targeting plasmids
+
+rm /home/vincent/Desktop/Projects/2020_CRISPRscope/data/plasmid_hits.txt
+for idss in $(grep "plasmid" -i /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt |cut -f 1)
+do
+
+counts=$(grep "gi|${idss}|" -c /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv)
+echo -e ${idss}"\t"${counts}
+grep "gi|${idss}|"  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv >> /home/vincent/Desktop/Projects/2020_CRISPRscope/data/plasmid_hits.txt
+done
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/plasmid_hits.txt
+
+
+##----
+rm /home/vincent/Desktop/Projects/2020_CRISPRscope/data/CRISPR_hits.txt
+for idss in $(grep "CRISPR" -i /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names.txt |cut -f 1)
+do
+
+counts=$(grep "gi|${idss}|" -c /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv)
+echo -e ${idss}"\t"${counts}
+
+grep "gi|${idss}|"  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv >> /home/vincent/Desktop/Projects/2020_CRISPRscope/data/CRISPR_hits.txt
+done
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/CRISPR_hits.txt
+
+##---------------------download non-CRISPR/non-plasmid genomes
+curl 'ftp://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/assembly_summary.txt'  > /home/vincent/Desktop/Projects/2020_CRISPRscope/download.file
+grep "AJ004687.2" /home/vincent/Desktop/Projects/2020_CRISPRscope/download.file
+
+
+###----------------------------------------
+#prepare non-crispr and non-plasmid entrez file
+###----------------------------------------
+wc -l  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names_genomes.txt
+
+
+rm /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS.txt
+for idss in $(cat /home/vincent/Desktop/Projects/2020_CRISPRscope/data/gi_sequence_names_genomes.txt)
+do
+
+grep "gi|${idss}|"  /home/vincent/Desktop/Projects/2020_CRISPRscope/data/CRISPRblast_nt_vincent.txt >> /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS.txt
+done
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS.txt
+
+##------------subset to only bacterial
+rm /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS_curated.txt
+for clustersss in $(cut -d ',' -f 1 /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv|sed '1d')
+do
+
+grep "^${clustersss}$(printf '\t')" /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS.txt >> /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS_curated.txt
+
+
+done
+
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS_curated.txt
+wc -l /home/vincent/Desktop/Projects/2020_CRISPRscope/data/BLAST_Bacterial_hits_target_id.csv
+
+```
+
+
+```{bash}
+
+
+scp /home/vincent/Desktop/Projects/2020_CRISPRscope/data/non_crispr_or_plasmid_blastHITS_curated.txt vincent@130.223.51.66:/data/projects/p539_crisprscope/CRISPRblast//blast_02/
+```
+
+
+download from entrez
+
+```{bash}
+##blast ouput
+
+less /home/vincent/Desktop/Projects/2020_CRISPRscope/data/CRISPRblast_nt_vincent.txt
+
+##----------test entrez
+mkdir -p /data/projects/p539_crisprscope/entrez_download
+cd /data/projects/p539_crisprscope/entrez_download
+
+queryiesss=1015427617
+startsss=10
+endsss=2000
+
+#esearch -db nucleotide -query "${queryiesss}" |  efetch -format fasta -seq_start ${startsss} -seq_stop ${endsss}
+
+#esearch -db nucleotide -query "${queryiesss}" |  efetch -format gb |head -50
+
+#esearch -db nucleotide -query "${queryiesss}" |  efetch -format gb | wc -l
+esearch -db nucleotide -query "${queryiesss}" |  efetch -format gb -seq_start ${startsss} -seq_stop ${endsss} | wc -l
+
+##-------------------------------------
+##do entrez
+##-------------------------------------
+
+queryiesss=1015427617
+startsss=10
+endsss=2000
+rm -r /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/
+mkdir -p /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/
+for clustersss in $(cut -f 1 /data/projects/p539_crisprscope/CRISPRblast//blast_02/non_crispr_or_plasmid_blastHITS_curated.txt)
+do
+#echo ${clustersss}
+
+queryiesss=$(grep "^${clustersss}$(printf '\t')"  /data/projects/p539_crisprscope/CRISPRblast//blast_02/non_crispr_or_plasmid_blastHITS_curated.txt |cut -f 2|cut -d '|' -f 2 )
+startsss=$(grep "^${clustersss}$(printf '\t')"  /data/projects/p539_crisprscope/CRISPRblast//blast_02/non_crispr_or_plasmid_blastHITS_curated.txt |cut -f 9)
+endsss=$(grep "^${clustersss}$(printf '\t')"  /data/projects/p539_crisprscope/CRISPRblast//blast_02/non_crispr_or_plasmid_blastHITS_curated.txt |cut -f 10)
+
+
+
+
+ if [ "$startsss" -gt "$endsss"  ]
+        then
+        #echo -e "reversed"
+        startsss_cor=$(echo $endsss|awk '{print $1-2000}')
+        endsss_cor=$(echo $startsss|awk '{print $1+2000}')
+        
+      else
+        # echo -e "correct"
+        startsss_cor=$(echo $startsss|awk '{print $1-2000}')
+        endsss_cor=$(echo $endsss|awk '{print $1+2000}')
+      fi
+      
+      
+   if [ "$startsss_cor" -lt "0"  ]
+        then
+        startsss_cor=1
+      fi
+
+echo -e ${clustersss}"\t"${queryiesss}"\t"${startsss_cor}"\t"${endsss_cor}
+
+esearch -db nucleotide -query "${queryiesss}" |  efetch -format gb -seq_start ${startsss_cor} -seq_stop ${endsss} > /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/${clustersss}_${queryiesss}.txt
+
+
+done
+
+
+##--------------------------
+### which are CRISPR
+##--------------------------
+ls /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/|wc -l 
+rm /data/projects/p539_crisprscope/CRISPRblast//blast_02/tmp.txt
+for filesss in $(ls /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/)
+do
+grep "FEATURES" -A 1000  /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/$filesss |grep "CRISPR" -i |head -1 >> /data/projects/p539_crisprscope/CRISPRblast//blast_02/tmp.txt
+done
+wc -l /data/projects/p539_crisprscope/CRISPRblast//blast_02/tmp.txt
+
+##--------------------------
+###  make nice output
+##--------------------------
+rm /data/projects/p539_crisprscope/CRISPRblast//blast_02/CRISPRblast_nt_vincent_CRISPR.txt
+for filesss in $(ls /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/)
+do
+countss=$(grep "FEATURES" -A 1000  /data/projects/p539_crisprscope/CRISPRblast//blast_02/efetch/$filesss |grep "CRISPR" -i | wc -l )
+
+clustersss=$(echo ${filesss}|cut -d '_' -f 1)
+
+echo -e ${clustersss}"\t"${countss}
+   if [ "$countss" -gt 0  ]
+        then
+        
+        echo -e ${clustersss}"\t"${countss}"\tCRISPRCRISPRCRISPR"
+        
+        grep "^${clustersss}$(printf '\t')" /data/projects/p539_crisprscope/CRISPRblast//blast_02/non_crispr_or_plasmid_blastHITS_curated.txt >> /data/projects/p539_crisprscope/CRISPRblast//blast_02/CRISPRblast_nt_vincent_CRISPR.txt
+        
+        
+      fi
+
+done
+
+```
+
+# Supplment
+
+### Supplementary infos CRISPR
+
+```{r }
+###------------------------------------------------
+#number of arrays
+###------------------------------------------------
+
+raw_org_arr_sp_class_type <- read_csv("data_submit/raw_org_arr_sp_class_type.csv") %>% group_by(Organism,ArrayID,Cas_class,Cas_subtype) %>% summarise(spacerCounts=n())
+raw_org_arr_sp_class_type$strain <- raw_org_arr_sp_class_type$ArrayID %>% gsub("_3$","",.)%>% gsub("_2$","",.)%>% gsub("_1$","",.)%>% gsub("_4$","",.)%>% gsub("_4$","",.)%>% gsub("_5$","",.)%>% gsub("_6$","",.)%>% gsub("_7$","",.)
+
+arry_counts_strain <- raw_org_arr_sp_class_type %>% group_by(Organism,strain) %>% summarise(arrays_num=n())
+table(arry_counts_strain$arrays_num)
+table(arry_counts_strain$Organism)
+
+arry_counts_strain %>% filter(Organism=="Streptococcus_thermophilus")
+
+arry_counts_strain_sum <- arry_counts_strain %>% group_by(Organism) %>% summarise(mean=mean(arrays_num),median=median(arrays_num),sd=sd(arrays_num))
+
+ggplot(arry_counts_strain,aes(x=Organism,y=arrays_num))+geom_boxplot()+lims(y=c(0,5))
+
+
+ggplot(arry_counts_strain_sum) +
+  geom_bar( aes(x=Organism, y=mean), stat="identity", fill="forestgreen", alpha=0.5) +
+  geom_errorbar( aes(x=Organism, ymin=mean-sd, ymax=mean+sd), alpha=0.5) +
+  # geom_errorbar( aes(x=Organism, ymin=mean-sd, ymax=mean+sd), width=0.4, colour="orange", alpha=0.9, size=1.5) +
+  ggtitle("using standard deviation")+theme(axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1),legend.title = element_blank())
+
+##---------new
+
+NbArrayPerStrain <- read_csv("data_submit/NbArrayPerStrain.csv")
+
+table(NbArrayPerStrain$Organism)
+
+NbArrayPerStrain %>% filter(Organism=="Streptococcus_thermophilus")
+
+ggplot(NbArrayPerStrain,aes(x=Organism,y=nb_array_strain))+geom_boxplot()+theme_classic()+labs(x="",y="count")+theme(axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1),legend.title = element_blank())
+
+
+NbArrayPerStrain_means <- NbArrayPerStrain %>% group_by(Organism) %>% summarise(mean=mean(nb_array_strain),median=median(nb_array_strain),sd=sd(nb_array_strain))
+
+ggplot(NbArrayPerStrain_means) +
+  geom_bar( aes(x=Organism, y=mean), stat="identity", fill="forestgreen", alpha=0.5) +
+  geom_errorbar( aes(x=Organism, ymin=mean-sd, ymax=mean+sd), alpha=0.5) +
+  # geom_errorbar( aes(x=Organism, ymin=mean-sd, ymax=mean+sd), width=0.4, colour="orange", alpha=0.9, size=1.5) +
+  ggtitle("using standard deviation")+theme(axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1),legend.title = element_blank())
+
+###-------add to phylogeny
+
+NbArrayPerStrain_means_cor <- NbArrayPerStrain_means
+NbArrayPerStrain_means_cor$id <- gsub("_"," ",NbArrayPerStrain_means_cor$Organism)
+NbArrayPerStrain_means_cor <- NbArrayPerStrain_means_cor %>% select(-Organism) %>% rename(value=mean) %>% add_column(category="all") %>% select(id,value,category,sd)
+
+table(pathway_identification_species_plot_complete$species)
+table(NbArrayPerStrain_means$species)
+NbArrayPerStrain_means$species %in% pathway_identification_species_plot_complete$species
+
+
+
+p8 <- facet_plot(gtree_01, panel = 'defense systems', data = NbArrayPerStrain_means,
+                geom = geom_tile,color = "grey",width=0.7,height=0.7,size=0.2,
+                mapping = aes(x = mechanism_final,fill=percent_species))+scale_x_discrete()+scale_fill_gradient2(na.value="white",low = "white", high = "red", mid = "white",
+   midpoint = 0, limit = c(-100,100), space = "Lab",
+   name="max growth")+theme(axis.text.y = element_text(size=7),
+      axis.text.x = element_text(angle = 45,size=8,hjust=1),axis.title=element_blank(),
+    legend.title = element_blank()) #+xlim_expand(c(0,500), 'Genome count')
+p8
+
+
+p9 <- facet_plot(gtree_01, panel = 'Genome count', data = NbArrayPerStrain_means_cor, 
+                geom = geom_barh,fill="grey66",
+                mapping = aes(x = value), width = 0.7, 
+                stat='identity')+ xlim_expand(xlim=c(0, 6.7), panel = "Genome count") 
+                # geom_errorbarh aes(xmin=value-sd, xmax=value+sd), alpha=0.5)
+p9
+
+
+max(NbArrayPerStrain_means_cor$value+NbArrayPerStrain_means_cor$sd)
+
+p10 <- facet_plot(p9, panel = 'Genome count_02', data = NbArrayPerStrain_means_cor, 
+                geom = geom_errorbarh, 
+                mapping = aes(x=value,xmin=value-sd, xmax=value+sd), width = 0.7)+ xlim_expand(xlim=c(0, 6.7), panel = "Genome count_02") 
+                # geom_errorbarh aes(xmin=value-sd, xmax=value+sd), alpha=0.5)
+p10
+
+###---------------------------------
+##number of CRISPR spacers
+###---------------------------------
+
+raw_org_arr_sp_class_type <- read_csv("data_submit/raw_org_arr_sp_class_type.csv") %>% group_by(Organism,ArrayID,Cas_class,Cas_subtype) %>% summarise(spacerCounts=n()) %>% mutate(Organism=gsub("_"," ",Organism)) %>% filter(spacerCounts<100)
+
+ggplot(raw_org_arr_sp_class_type,aes(x=spacerCounts)) +
+  geom_bar() +
+  xlab("Number of spacers") +
+  ylab("Array count")+
+  theme_classic()
+
+ggplot(raw_org_arr_sp_class_type,aes(x=Organism,y=spacerCounts)) +
+  geom_boxplot() +
+  xlab("") +
+  ylab("Array count")+
+  theme_classic()+coord_trans(y="log10")
+
+raw_org_arr_sp_class_type_cleaned <- raw_org_arr_sp_class_type %>% rename(id=Organism)%>% rename(value=spacerCounts) %>% add_column(category="all") %>% ungroup() %>% select(id,value,category)
+
+
+table(pathway_identification_species_plot_complete$species)
+table(raw_org_arr_sp_class_type_cleaned$id)
+raw_org_arr_sp_class_type_cleaned$id %in% pathway_identification_species_plot_complete$species
+sum(!raw_org_arr_sp_class_type_cleaned$id %in% gtree_01$data$label)
+
+p11 <- facet_plot(p10, panel = 'array size', data = raw_org_arr_sp_class_type_cleaned, 
+                geom = geom_boxploth, 
+                mapping = aes(x= log(value),group=label),outlier.shape=NA)+ xlim_expand(xlim=c(log(), 4.60517), panel = "array size")#+scale_x_range(breaks=c(2.3,3.2,3.9,4.6), panel = "array size")
+                # geom_errorbarh aes(xmin=value-sd, xmax=value+sd), alpha=0.5)
+p11
+
+
+mean(raw_org_arr_sp_class_type_cleaned$value)
+mean(NbArrayPerStrain_means_cor$value)
+
+```
+
+
+### Assign to environment
+
+```{r}
+##-------------------------------------
+#assign samples to mesophilic or thermophilic
+##-------------------------------------
+
+data_environment_species <- OTU_subset_long_extended_full_dominance_again_final_02 %>% filter(species_new %in% c("Streptococcus thermophilus","Lactococcus lactis")) %>% select(sample_name,species_new,relAbundance_02) %>% spread(., species_new, relAbundance_02)%>%replace(is.na(.), 0) %>% mutate(total_dom=`Lactococcus lactis`+`Streptococcus thermophilus`) %>% filter(total_dom>5)
+# data_environment_species$`Streptococcus thermophilus`
+ggplot(data_environment_species,aes(x=total_dom))+geom_histogram()+theme_classic()
+
+
+metagenome_repeats_by_projects_wide <- spread(metagenome_repeats_by_projects_long, cluster_repeat_identity, proxy)%>%replace(is.na(.), 0)  %>% remove_rownames()%>% column_to_rownames(., var = "sample_name")# %>% remove_rownames %>% column_to_rownames(var="spacer_name") 
+
+data_environment_species$environment <- ifelse(data_environment_species$`Lactococcus lactis`>data_environment_species$`Streptococcus thermophilus`,"mesophilic","thermophilic")
+
+table(data_environment_species$environment)
+
+data_environment_species$diff <- abs(data_environment_species$`Lactococcus lactis`-data_environment_species$`Streptococcus thermophilus`)-data_environment_species$total_dom
+
+ggplot(data_environment_species,aes(x=diff))+geom_histogram()+theme_classic()
+
+
+data_environment_species_environ <- data_environment_species %>% select(sample_name,environment)
+
+##-------------------------------------
+#see if the species are mor abundant in either or
+##-------------------------------------
+
+data_environment_allspecies_env <- OTU_subset_long_extended_full_dominance_again_final_02 %>% select(sample_name,species_new,relAbundance_02) %>% inner_join(.,data_environment_species_environ,by="sample_name")
+
+ggplot(data_environment_allspecies_env,aes(x=environment,y=relAbundance_02))+geom_boxplot()+theme_classic()+facet_wrap(~species_new,scales = "free_y")
+
+table(data_environment_allspecies_env$species_new) %>% as.data.frame() %>% filter(Freq<8)
+table(data_environment_allspecies_env$species_new) %>% as.data.frame() %>% filter(Freq>7)
+
+
+ggplot(data_environment_allspecies_env,aes(x=environment,y=relAbundance_02))+geom_boxplot(alpha=0.2)+theme_classic()+facet_wrap(~species_new,scales = "free_y")+geom_signif( comparisons = list(c("mesophilic", "thermophilic")),map_signif_level = FALSE )+geom_jitter(alpha=0.8)
+
+# plot_phage_cluster <- ggplot(IMGVR_Hits_join_reduced_counts_depupli_sterm_sub_FINAL,aes(x=EXPLAINEd,y=count))+geom_boxplot()+theme_classic()+ stat_compare_means()+labs(y="Phage vOTU size",x="")
+
+#+geom_signif( comparisons = list(c("unobserved", "CRISPR match")),map_signif_level = FALSE )
+plot_phage_cluster
+
+###-------------------
+#thermophilic samples
+c("Lactobacillus zeae","Lactobacillus delbrueckii","Streptococcus thermophilus","Lactobacillus helveticus")
+unique(data_environment_allspecies_env$species_new)
+#mesophilic samples
+c("Lactobacillus versmoldensis","Lactococcus lactis","Streptococcus thermophilus","Propionibacterium freudenreichii")
+
+##------------------------
+###color plots
+##------------------------
+data_environment_allspecies_env$species_assignement <- ifelse(data_environment_allspecies_env$species_new%in%c("Lactobacillus zeae","Lactobacillus delbrueckii","Streptococcus thermophilus","Lactobacillus helveticus"),"thermophilic",ifelse(data_environment_allspecies_env$species_new%in%c("Lactobacillus versmoldensis","Lactococcus lactis","Streptococcus thermophilus","Propionibacterium freudenreichii"),"mesophilic","generalist"))
+
+data_environment_allspecies_env$species_assignement = factor(data_environment_allspecies_env$species_assignement, levels=rev(c("generalist","mesophilic","thermophilic")))
+
+colorssss <- c("orange","blue","grey77")
+
+ggplot(data_environment_allspecies_env,aes(x=environment,y=relAbundance_02,fill=species_assignement,color=species_assignement))+geom_boxplot(alpha=0.2)+theme_classic()+facet_wrap(~species_new,scales = "free_y")+geom_signif( comparisons = list(c("mesophilic", "thermophilic")),map_signif_level = FALSE )+geom_jitter(alpha=0.8)+scale_fill_manual(values = colorssss)+scale_color_manual(values = colorssss)
+
+data_environment_allspecies_env$species_assignement <- ifelse(data_environment_allspecies_env$species_new%in%c("Lacticaseibacillus casei","Lactobacillus delbrueckii","Streptococcus thermophilus","Lactobacillus helveticus"),"thermophilic",ifelse(data_environment_allspecies_env$species_new%in%c("Companilactobacillus versmoldensis","Lactococcus lactis","Streptococcus thermophilus","Propionibacterium freudenreichii"),"mesophilic","generalist"))
+
+
+###--------------------------------------------
+#change names
+
+data_environment_allspecies_env$species_new <- plyr::revalue(data_environment_allspecies_env$species_new,c("Lactobacillus rhamnosus"        = "Lacticaseibacillus rhamnosus",
+"Lactobacillus versmoldensis"    = "Companilactobacillus versmoldensis",
+"Lactobacillus curvatus"         = "Latilactobacillus curvatus",
+"Lactobacillus rhamnosus"        = "Lacticaseibacillus rhamnosus",
+"Lactobacillus coryniformis"     = "Loigolactobacillus coryniformis",
+"Lactobacillus fermentum"        = "Limosilactobacillus fermentum",
+"Lactobacillus zeae"             = "Lacticaseibacillus casei"))
+
+
+final_abudnance_plot <- ggplot(data_environment_allspecies_env,aes(x=environment,y=relAbundance_02,fill=species_assignement,color=species_assignement))+geom_boxplot(alpha=0.2)+theme_classic()+facet_wrap(~species_new,scales = "free_y")+geom_signif( comparisons = list(c("mesophilic", "thermophilic")),map_signif_level = FALSE )+geom_jitter(alpha=0.8)+scale_fill_manual(values = colorssss)+scale_color_manual(values = colorssss)+labs(x="Metagenomic sample environement",y="Relative abundance")
+
+final_abudnance_plot
+  png("~/Desktop/Projects/2020_CRISPRscope/Plots/species_environement_assignement.png", width = 3500, height = 2100,res=300)
+   # pdf("~/Desktop/Projects/2020_CRISPRscope/Plots//metagenome_only_repeats_subtype.pdf",width=6,height=3)
+
+final_abudnance_plot
+
+dev.off()
+
+```
+
+## ANTI-CRISPR
+
+Get ANTI-CRISPRs collection. 
+```{bash}
+cd /home/vincent/Desktop/Projects/2020_CRISPRscope/Anti-CRISPR
+
+sed '1d' anti-CRISPR_assembly.csv |awk -F "\t" '{OFS="\n"}{print ">"$1"_"$2,$6}'| sed 's/ //g' > anti-CRISPR_assembly.fasta
+
+scp -r /home/vincent/Desktop/Projects/2020_CRISPRscope/Anti-CRISPR/anti-CRISPR_assembly.fasta vincent@130.223.51.66:/data/projects/p539_crisprscope/CRISPRblast/
+scp -r /home/vincent/Downloads/IMGVR_all_proteins.faa.gz vincent@130.223.51.66:/data/projects/p539_crisprscope/CRISPRblast/
+
+cd /data/projects/p539_crisprscope/CRISPRblast/
+gunzip -c IMGVR_all_proteins.faa.gz > /work/Databases/20210128_img_vr/IMGVR_all_proteins.faa
+```
+
+cd-hit with anti-crispr collection
+
+```{bash}
+sed 's/>/>ANTICRISPR_/g' /data/projects/p539_crisprscope/CRISPRblast/anti-CRISPR_assembly.fasta >> /work/Databases/20210128_img_vr/IMGVR_all_proteins.faa
+ cd /data/projects/p539_crisprscope/CRISPRblast/blast_antiCRISPR/
+ 
+ mmseqs easy-cluster /work/Databases/20210128_img_vr/IMGVR_all_proteins.faa /work/Databases/20210128_img_vr/results /work/Databases/20210128_img_vr/tmp
+
+##-------------------cluster
+less /work/Databases/20210128_img_vr/results_cluster.tsv
+
+grep "ANTICRISPR_" -c /work/Databases/20210128_img_vr/results_cluster.tsv
+grep "ANTICRISPR_"  /work/Databases/20210128_img_vr/results_cluster.tsv |cut -f 1|sort|uniq |wc -l
+
+rm /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs.tsv
+for clustersss in $(grep "ANTICRISPR_"  /work/Databases/20210128_img_vr/results_cluster.tsv |cut -f 1|sort|uniq)
+do
+echo ${clustersss}
+grep "${clustersss}" /work/Databases/20210128_img_vr/results_cluster.tsv >> /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs.tsv
+
+done
+
+##---------------------------------
+
+grep "IMGVR_UViG_2537561701_000001|2537583118|2538309733"  /work/Databases/20210128_img_vr/IMGVR_all_Sequence_information.tsv
+
+grep "IMGVR_UViG_2537561701_000001"  /work/Databases/20210128_img_vr/IMGVR_all_Sequence_information.tsv
+grep "UGV-GENOME-0217557"  /work/Databases/20210128_img_vr/IMGVR_all_Sequence_information.tsv
+
+cut -f 2 /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs.tsv |grep "ANTICRISPR" -v |cut -d '|' -f 1 >  /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs_REFs.tsv
+
+ grep "UGV-GENOME-0217557"  /work/Databases/20210128_img_vr/IMGVR_all_Sequence_information.tsv|cut -f 6
+ 
+ ##--------identify vOTUs with antiCRISPRs
+ rm /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs_vOTUs.tsv
+for refsss in $(cat /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs_REFs.tsv)
+do
+
+ awk -F "\t" -v refzzz="$refsss" '{if($1==refzzz)print $6}'  /work/Databases/20210128_img_vr/IMGVR_all_Sequence_information.tsv >> /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs_vOTUs.tsv
+
+
+done
+
+wc -l /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs_REFs.tsv
+wc -l /work/Databases/20210128_img_vr/results_cluster_only_ANTICRISPRs_vOTUs.tsv
+
+```
+
+
+```{r}
+###---------------------
+ IMGVR_Hits_join <- read_csv("data_submit/IMGVR_Hits_join.csv")
+
+IMGVR_Hits_join_reduced <- IMGVR_Hits_join %>% select(c("qseqid", "sseqid" ,"vOTU","Prediction method","Host taxonomy prediction" )) %>% filter(qseqid %in% IMGVR_Hits_join_short_filter_sipho$qseqid)
+IMGVR_Hits_join_reduced$qseqid %>% unique() %>% length()
+
+IMGVR_Hits_join_reduced$taxmap1 <- str_split_fixed(IMGVR_Hits_join_reduced$`Host taxonomy prediction`, fixed(";"), 10)[,7] 
+
+IMGVR_Hits_join_reduced_counts <- IMGVR_Hits_join_reduced %>% group_by(qseqid,sseqid,vOTU,taxmap1) %>% summarise(counts=n()) %>% arrange(., qseqid, -counts)
+
+IMGVR_Hits_join_reduced_counts_depupli <- IMGVR_Hits_join_reduced_counts[!duplicated(IMGVR_Hits_join_reduced_counts[,c(-4,-5)]), ]
+
+table(IMGVR_Hits_join_reduced_counts_depupli$taxmap1)
+
+vOTUs_with_StermHits <- IMGVR_Hits_join_reduced_counts_depupli %>% filter(taxmap1=="Streptococcus thermophilus") %>% select(vOTU) %>% ungroup() %>% distinct(vOTU)
+
+###-----------------all Sterm vOTUs
+
+vOTUS_in_which_species <- read_csv("data_submit/vOTUS_in_which_species.csv")
+vOTUs_sterm <- vOTUS_in_which_species %>% filter(taxon=="Streptococcus thermophilus") %>% select(vOTU) %>% distinct()
+###-------bring together
+
+vOTUs_with_StermHits$vOTU %in% vOTUs_sterm$vOTU
+
+vOTUs_sterm$group <- ifelse(vOTUs_sterm$vOTU%in%vOTUs_with_StermHits$vOTU,"CRISPR targeted","no hit")
+##---
+vOTUS_with_ANTICRISPR <- read_csv("data_submit/results_cluster_only_ANTICRISPRs_vOTUs.tsv", col_names = "vOTU")
+
+vOTUs_sterm$ANTICRISPR <- ifelse(vOTUs_sterm$vOTU%in%vOTUS_with_ANTICRISPR$vOTU,"yes","no")
+
+vOTUs_sterm_sum <- vOTUs_sterm %>%  group_by(group,ANTICRISPR) %>% summarise(counts=n())
+colnames(vOTUs_sterm_sum)[2] <- "Anti-CRISPR contained"
+
+plot_antiCRISPR <- ggplot(vOTUs_sterm_sum,aes(x=group,y=counts,fill=`Anti-CRISPR contained`))+geom_bar(stat = "identity")+theme_classic()+labs(x="",y="number vOTUs")
+plot_antiCRISPR
+
+```
+
+
+```{bash}
+mappingFile=/data/projects/p539_crisprscope/CRISPRblast/anti-CRISPR_assembly.fasta
+BaseLocation=/data/projects/p539_crisprscope/CRISPRblast/
+mkdir -p ${BaseLocation}/blast_antiCRISPR
+
+cd /home/vincent/anaconda3/envs/PROKKA/db/hmm
+#makeblastdb -dbtype nucl -in IMGVR_all_nucleotides.fna
+
+tblastn -num_threads 37 -max_hsps 1 -max_target_seqs 1 -show_gis \
+  -query ${mappingFile} \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle slen" \
+  -db /work/Databases/20210128_img_vr/IMGVR_all_nucleotides.fna \
+  -out  ${BaseLocation}/blast_antiCRISPR/ANTI_CRISPRblast_IMGVR.txt \
+  -evalue 0.01 -word_size 4
+
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB.txt 
+wc -l   ${BaseLocation}/blast/CRISPRblast_ViralDB_old.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_nucleotideDB.txt
+wc -l   ${BaseLocation}/blast/CRISPRblast_IMGVR.txt
+
+```
+
+
+
+## cOTU vs. spacer correlation
+
+```{r}
+export_fig4A_values <- read_csv("data_submit/export_fig4A_values.csv") %>% filter(!name %in% c( "Lordan et al. 2019  ( 6 )",       "Pasolli et al. 2020  ( 1594 )" ,  "Swiss raclette  ( 2427 )" ,       "Swiss starter culture  ( 2882 )", "Walsh et al. 2020  ( 1607 )"    )) %>% filter(final_hit=="Viral") %>%  mutate(non_viral=100-HitRatio) %>% select(name,non_viral)
+
+fraction_votu_per_species <- read_csv("data_submit/fraction_votu_per_species.csv") %>% select(Organism,n_votus_per_total)
+
+export_fig4A_values$name <- plyr::revalue(export_fig4A_values$name,c("Bani  ( 606 )" ="Bifidobacterium animalis","Cacn  ( 38 )"="Cutibacterium acnes","Ccas  ( 140 )"="Corynebacterium casei","Laci  ( 59 )"="Lactobacillus acidophilus","Lcas  ( 301 )"="Lacticaseibacillus casei","Lcor  ( 400 )"="Loigolactobacillus coryniformis","Lcur  ( 545 )"="Latilactobacillus curvatus","Ldel  ( 3189 )"="Lactobacillus delbrueckii","Leulac  ( 163 )"="Leuconostoc lactis","Lfer  ( 1991 )"="Limosilactobacillus fermentum","Lhelv  ( 1590 )"="Lactobacillus helveticus","Lpla  ( 567 )"="Lactiplantibacillus plantarum","Lpseu  ( 15 )"="Leuconostoc pseudomesenteroides","Lrham  ( 372 )"="Lacticaseibacillus rhamnosus","Msciu  ( 118 )"="Mammaliicoccus sciuri","Pfreu  ( 2309 )"="Propionibacterium freudenreichii","Ppar  ( 258 )"="Pediococcus parvulus","Ppen  ( 137 )"="Pediococcus pentosaceus","Sequo  ( 16 )"="Staphylococcus equorum","Slute  ( 316 )"="Streptococcus lutetiensis","Stherm  ( 3376 )"="Streptococcus thermophilus"))
+
+final_explaine_votu <- merge(export_fig4A_values,fraction_votu_per_species,by.x="name",by.y="Organism")
+
+ggplot(final_explaine_votu,aes(x=non_viral,y=n_votus_per_total))+geom_point()+theme_classic()
+
+```
+
+## HMM ABI
+
+```{r}
+
+all_scans_ABI <- read_delim("data_submit/all_scans_ABI.txt", "\t", escape_double = FALSE, col_names = c("genome","geneOfInterest","gene")) %>% filter(!geneOfInterest %in% c("GalA","GalB","AbiL","AbiK","AbiA")) %>% filter(!geneOfInterest %in% c("STM_4041","STM14_4038","STM14_4040"))
+all_scans_ABI$geneOfInterest <- plyr::revalue(all_scans_ABI$geneOfInterest,c("JatA"="JetA"))
+
+all_scans_ABI_count <- all_scans_ABI %>% group_by(genome,geneOfInterest) %>% dplyr::summarise(counts=n()) %>% mutate(mechanism_final=geneOfInterest)%>% mutate(mechanism_gene_count=1)
+
+##-----------------------------------
+
+see_gene_count_ABI <- all_scans_ABI_count 
+
+tmp <- see_gene_count_ABI %>% filter(is.na(mechanism_final))
+
+pathway_identification_ABI <- see_gene_count_ABI %>% group_by(genome,mechanism_final,mechanism_gene_count) %>%  summarise(number_genes_identified=n())
+
+pathway_identification_ABI$percentPathway <- 100*(pathway_identification_ABI$number_genes_identified/pathway_identification_ABI$mechanism_gene_count)
+
+pathway_identification_ABI$Completness <- ifelse(pathway_identification_ABI$percentPathway>99,"Yes","No")
+
+pathway_identification_ABI$Genus <- str_split_fixed(pathway_identification_ABI$genome, fixed("_"), 3)[,1]
+pathway_identification_ABI$spec <- str_split_fixed(pathway_identification_ABI$genome, fixed("_"), 3)[,2]
+pathway_identification_ABI$species <- paste(pathway_identification_ABI$Genus,pathway_identification_ABI$spec,sep="_")
+
+###------------------------------genomes counts
+species_counts_ABI <- all_scans_ABI %>% select(genome) %>% mutate(species=paste(str_split_fixed(genome, fixed("_"), 3)[,1],str_split_fixed(genome, fixed("_"), 3)[,2],sep="_")) %>% unique() %>% group_by(species) %>% summarise(counts=n())
+
+###------------------------------abundances
+tmp1 <- pathway_identification_ABI %>% group_by(species,mechanism_final) %>% summarise(Present=sum(Completness=="Yes"),Absent=sum(Completness!="Yes"))
+
+pathway_identification_species_ABI <- merge(tmp1,species_counts_ABI) %>% mutate(percent_species=100*(Present/counts))
+
+##-------------------------------
+
+ggheatmap <- ggplot(pathway_identification_species_ABI, aes(y=species, x=mechanism_final, fill = percent_species))+
+ geom_tile(color = "white",size=1.1)+
+ scale_fill_gradient2(low = "white", high = "red", mid = "white",
+   midpoint = 0, limit = c(-100,100), space = "Lab",
+   name="max growth") +theme_classic()+
+  scale_x_discrete(position = "top") +
+ theme(axis.text.y = element_text(size=7),
+      axis.text.x = element_text(angle = 45,vjust=1,
+    size = 12, hjust = 0),axis.title=element_blank(), 
+    legend.title = element_blank())
+
+ print(ggheatmap)
+ 
+ ##-------------------------------
+ 
+ 
+ tmps_02 <- pathway_identification_ABI %>% group_by(species,genome) %>% summarise(number_mechanism=sum(Completness=="Yes"))
+
+ plot_ABI <- ggplot(tmps_02,aes(x=species,y=number_mechanism))+geom_boxplot()+theme_classic()+theme(axis.text.x = element_text(angle = 75,size=8,hjust=1))+lims(y=c(0,6))+labs(x="",y="number ABI")
+ 
+ plot_ABI
+ 
+  ##-------------------------------heatmap all ABI
+
+  ##find number of strains
+  tmptmp <- pathway_identification %>% ungroup()%>% select(genome,species) %>% distinct()
+tmp_04 <- table(tmptmp$species) %>% as.data.frame() %>% rename(., "tot_strains"="Freq") %>% rename(., "species"="Var1")
+  
+
+  tmps_03 <- pathway_identification_ABI %>% group_by(species,genome) %>% summarise(number_mechanism=sum(Completness=="Yes"),Absent=sum(Completness!="Yes")) %>% group_by(species) %>% summarise(genomes_with_ABI=n()) %>% inner_join(.,tmp_04,by="species") %>% mutate(percent_ABIs=100*(genomes_with_ABI/tot_strains))
+
+   tmps_02tmp1 <- pathway_identification_ABI %>% group_by(species,mechanism_final) %>% summarise(Present=sum(Completness=="Yes"),Absent=sum(Completness!="Yes"))
+```
+
+### Plasmid representation
+
+Here, we check if plasmid and bacterial hits are over represented in the protospacer hits. 
+
+```{bash}
+
+sed 's/ ,/,/g' ~/Desktop/Projects/2020_CRISPRscope/data/meta_sp_protosp_coverage_hits.csv > ~/Desktop/Projects/2020_CRISPRscope/data/meta_sp_protosp_coverage_hits_corrected.csv
+
+```
+
+
+```{r}
+meta_sp_protosp_coverage_hits <- read_csv("data_submit/meta_sp_protosp_coverage_hits_corrected.csv")
+
+meta_sp_protosp_coverage_hits <- read.csv("data_submit/meta_sp_protosp_coverage_hits.csv")  
+
+sum(meta_sp_protosp_coverage_hits$protospacer_cov<1)
+unique(meta_sp_protosp_coverage_hits$sample)
+unique(meta_sp_protosp_coverage_hits$cluster_spacer_identity) %>% length()
+
+###-----------------------------
+#bacteria
+databaseINterest="nt hit"
+databaseINterest="Plasmid"
+databaseINterest="Viral"
+databaseINterest="No hit"
+
+# table(meta_sp_protosp_coverage_hits$final_hit)
+
+# Interest_nometa <- meta_sp_protosp_coverage_hits %>% filter(final_hit==databaseINterest) %>% filter(protospacer_cov>0) %>% select(cluster_spacer_identity) %>% distinct()
+
+Interest_meeta <- meta_sp_protosp_coverage_hits %>% filter(final_hit==databaseINterest) %>% filter(protospacer_cov>0) %>% select(sample,cluster_spacer_identity) %>% unique() %>% nrow()
+
+Interest_nometa <- meta_sp_protosp_coverage_hits %>% filter(final_hit==databaseINterest) %>% filter(protospacer_cov==0) %>% select(sample,cluster_spacer_identity) %>% unique() %>% nrow()
+
+noInterest_meeta <- meta_sp_protosp_coverage_hits %>% filter(final_hit!=databaseINterest) %>% filter(protospacer_cov>0) %>% select(sample,cluster_spacer_identity) %>% unique() %>% nrow()
+
+noInterest_nometa <- meta_sp_protosp_coverage_hits %>% filter(final_hit!=databaseINterest) %>% filter(protospacer_cov==0) %>% select(sample,cluster_spacer_identity) %>% unique() %>% nrow()
+
+fisher_prep <- data.frame(present=c(Interest_meeta,noInterest_meeta),absent=c(Interest_nometa,noInterest_nometa))
+
+rownames(fisher_prep) <- c(databaseINterest,"rest")
+fisher_prep %>% mutate(percent=100*(present/(present+absent)))
+fisher_prep 
+test <- fisher.test(fisher_prep)
+test
+```
+
+
