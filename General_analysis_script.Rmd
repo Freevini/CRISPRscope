@@ -18,7 +18,7 @@ This script includes the complete workflow how the data for the following public
 
 *Extensive diversity and rapid turnover of phage defense systems in cheese-associated bacterial communities*
 
-The script contains the following information. The three parts consist of:
+The script contains the following information:
 
 1. Necessary R and bash tools
 2. Data collections
